@@ -31,19 +31,16 @@ module CargoHold.App
     , runHandler
     ) where
 
+import Imports hiding (log)
 import Bilge (MonadHttp, Manager, newManager, RequestId (..))
 import Bilge.RPC (HasRequestId (..))
 import CargoHold.CloudFront
 import CargoHold.Options as Opt
-import Control.Applicative
 import Control.Error (ExceptT, exceptT)
 import Control.Lens (view, makeLenses, set, (^.))
 import Control.Monad.Catch (MonadCatch, MonadThrow, MonadMask)
-import Control.Monad.Reader
 import Control.Monad.Trans.Resource (ResourceT, runResourceT, transResourceT)
 import Data.Metrics.Middleware (Metrics)
-import Data.Monoid
-import Data.Text (Text)
 import Network.HTTP.Client (ManagerSettings (..), responseTimeoutMicro)
 import Network.HTTP.Client.OpenSSL
 import Network.Wai (Request, ResponseReceived)
@@ -51,7 +48,6 @@ import Network.Wai.Routing (Continue)
 import Network.Wai.Utilities (Error (..), lookupRequestId)
 import OpenSSL.Session (SSLContext, SSLOption (..))
 import System.Logger.Class hiding (settings)
-import Prelude hiding (log)
 import Util.Options
 
 import qualified Aws
