@@ -1,4 +1,4 @@
-resolver: lts-11.13
+resolver: lts-12.4
 
 packages:
 - libs/api-bot
@@ -112,19 +112,22 @@ extra-deps:
 - currency-codes-2.0.0.0
 - data-timeout-0.3
 - geoip2-0.3.1.0
-- html-entities-1.1.4.1
 - mime-0.4.0.2
-- lens-labels-0.2.0.1
-- proto-lens-0.3.1.0
-- proto-lens-protoc-0.3.1.0
 - servant-multipart-0.11.2
-- snappy-0.2.0.2
-- tasty-1.0.0.1
 - text-icu-translit-0.1.0.7
 - wai-middleware-gunzip-0.0.2
-- HsOpenSSL-0.11.4.12
 - invertible-hxt-0.1  # for hsaml2 / spar
-- swagger2-2.2.1  # to get 'fromAesonOptions'
+
+# the following are just not on Stackage (and most of these were present in
+# LTS-11 but got evicted in LTS-12)
+- bloodhound-0.16.0.0
+- template-0.2.0.10
+- wai-route-0.4.0
+- text-format-0.3.2
+- redis-io-0.7.0
+- redis-resp-0.4.0
+- hedgehog-quickcheck-0.1
+
 
 flags:
   types-common:
