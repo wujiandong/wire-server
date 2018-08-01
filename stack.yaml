@@ -106,10 +106,6 @@ packages:
     git: https://github.com/wireapp/hspec-wai
     commit: ca10d13deab929f1cc3a569abea2e7fbe35fdbe3  # https://github.com/hspec/hspec-wai/pull/49
   extra-dep: true
-- location:
-    git: https://github.com/wireapp/servant-multipart
-    commit: a5f0b9ce508f9d4c28a41d2b856387a7db281577  # https://github.com/haskell-servant/servant-multipart/pull/17
-  extra-dep: true
 
 extra-deps:
 - base58-bytestring-0.1.0
@@ -121,6 +117,7 @@ extra-deps:
 - lens-labels-0.2.0.1
 - proto-lens-0.3.1.0
 - proto-lens-protoc-0.3.1.0
+- servant-multipart-0.11.2
 - snappy-0.2.0.2
 - tasty-1.0.0.1
 - text-icu-translit-0.1.0.7
