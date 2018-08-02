@@ -4,7 +4,6 @@
 module Main (main) where
 
 import Bilge hiding (header, body)
-import Data.Monoid
 import Data.Proxy
 import Data.Tagged
 import Data.Text.Encoding (encodeUtf8)

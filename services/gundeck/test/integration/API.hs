@@ -32,7 +32,6 @@ import Data.List                      (sortBy)
 import Data.List1                     (List1)
 import Data.Maybe
 import Data.Misc                      ((<$$>))
-import Data.Monoid                    ((<>))
 import Data.Range
 import Data.Set                       (Set)
 import Data.Text                      (Text)

@@ -32,7 +32,6 @@ import Control.Applicative (optional)
 import Control.Error (hush)
 import Control.Lens (view)
 import Data.Attoparsec.ByteString.Char8
-import Data.Monoid
 import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Network.Mail.Mime

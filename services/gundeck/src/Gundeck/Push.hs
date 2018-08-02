@@ -27,7 +27,6 @@ import Data.Foldable (toList, forM_, foldl')
 import Data.Id
 import Data.List (partition)
 import Data.List1 (List1, list1)
-import Data.Monoid
 import Data.Predicate ((:::)(..))
 import Data.Range
 import Gundeck.Aws (endpointUsers)

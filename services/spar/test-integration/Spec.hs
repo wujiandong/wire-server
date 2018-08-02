@@ -2,7 +2,6 @@
 
 module Main where
 
-import Data.Monoid
 import Options.Applicative
 import Spar.Options
 import System.Environment

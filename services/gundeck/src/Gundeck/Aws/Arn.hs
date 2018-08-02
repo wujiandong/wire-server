@@ -39,7 +39,6 @@ import Control.Applicative
 import Control.Lens
 import Data.Char
 import Data.Attoparsec.Text
-import Data.Monoid ((<>))
 import Data.Text (Text, intercalate)
 import Data.Yaml (FromJSON)
 import Gundeck.Types (AppName (..), Transport (..))

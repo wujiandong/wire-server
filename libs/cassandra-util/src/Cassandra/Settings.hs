@@ -28,7 +28,6 @@ import Control.Lens
 import Control.Monad.IO.Class
 import Data.Aeson.Lens
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.Monoid
 import Data.Text (pack, stripSuffix, unpack)
 import Database.CQL.IO hiding (values)
 import Network.Wreq

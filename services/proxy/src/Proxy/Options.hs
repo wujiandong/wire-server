@@ -13,7 +13,6 @@ module Proxy.Options
     ) where
 
 import Control.Lens
-import Data.Monoid
 import Data.Word
 import Options.Applicative
 import Data.Aeson

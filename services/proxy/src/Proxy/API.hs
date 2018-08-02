@@ -16,7 +16,6 @@ import Control.Retry
 import Data.ByteString (ByteString, breakSubstring)
 import Data.CaseInsensitive (CI)
 import Data.Metrics.Middleware hiding (path)
-import Data.Monoid
 import Data.Text (Text)
 import Network.HTTP.ReverseProxy
 import Network.HTTP.Types

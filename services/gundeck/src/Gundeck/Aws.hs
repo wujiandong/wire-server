@@ -343,7 +343,7 @@ data PublishError
 
 newtype Attributes = Attributes
     { setAttributes :: Endo (HashMap Text SNS.MessageAttributeValue)
-    } deriving Monoid
+    } deriving (Semigroup, Monoid)
 
 -- Note [VoIP TTLs]
 -- ~~~~~~~~~~~~~~~~

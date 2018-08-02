@@ -4,7 +4,6 @@ module Gundeck.Push.Native.Crypto (CipherData (..), encrypt) where
 
 import Control.Monad.IO.Class
 import Data.ByteString (ByteString)
-import Data.Monoid ((<>))
 import Gundeck.Types
 import OpenSSL.EVP.Digest
 import OpenSSL.EVP.Cipher

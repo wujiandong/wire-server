@@ -3,7 +3,6 @@
 module CargoHold.API.Error where
 
 import CargoHold.Types.V3.Resumable (Offset, TotalSize)
-import Data.Monoid
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy.Builder
 import Data.Text.Lazy.Builder.Int

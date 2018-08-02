@@ -15,7 +15,6 @@ module Spar.Options
 import Control.Exception
 import Data.Aeson
 import Data.Int
-import Data.Monoid
 import Data.Text (Text)
 import Data.Time
 import GHC.Generics (Generic)

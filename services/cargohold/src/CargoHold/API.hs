@@ -14,7 +14,6 @@ import Data.Aeson (encode)
 import Data.ByteString.Conversion
 import Data.Id
 import Data.Metrics.Middleware hiding (metrics)
-import Data.Monoid
 import Data.Predicate
 import Data.Text (unpack)
 import Data.Text.Encoding (decodeLatin1)

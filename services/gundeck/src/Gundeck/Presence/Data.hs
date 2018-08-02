@@ -17,7 +17,6 @@ import Data.Foldable (for_)
 import Data.Id
 import Data.Maybe (mapMaybe)
 import Data.Misc (Milliseconds)
-import Data.Monoid
 import Database.Redis.IO hiding (Milliseconds)
 import Gundeck.Monad (Gundeck, posixTime)
 import Gundeck.Types

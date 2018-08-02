@@ -7,7 +7,6 @@ import Bilge hiding (header, body)
 import Control.Lens
 import Cassandra.Util
 import Data.Aeson
-import Data.Monoid
 import Data.Proxy
 import Data.Tagged
 import Data.Text (pack)

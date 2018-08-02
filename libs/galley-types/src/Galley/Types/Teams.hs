@@ -108,7 +108,6 @@ import Data.Json.Util
 import Data.List (find)
 import Data.Maybe (mapMaybe, isJust, isNothing)
 import Data.Misc (PlainTextPassword (..))
-import Data.Monoid
 import Data.Range
 import Data.Set (Set)
 import Data.Text (Text)
@@ -165,7 +164,7 @@ data TeamMember = TeamMember
 
 newtype TeamMemberList = TeamMemberList
     { _teamMembers :: [TeamMember]
-    } deriving (Monoid)
+    } deriving (Semigroup, Monoid)
 
 data TeamConversation = TeamConversation
     { _conversationId      :: ConvId

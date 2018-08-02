@@ -63,7 +63,6 @@ import Data.Foldable (toList)
 import Data.Id
 import Data.List (foldl')
 import Data.Maybe
-import Data.Monoid ((<>))
 import Data.Sequence (Seq, ViewR (..), ViewL (..))
 import Data.Time.Clock
 import Data.Text (Text)

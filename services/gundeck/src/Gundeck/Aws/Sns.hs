@@ -13,7 +13,6 @@ import Control.Error
 import Control.Lens
 import Data.Aeson
 import Data.Aeson.Lens
-import Data.Monoid
 import Data.Text (Text)
 import Gundeck.Aws.Arn (EndpointArn)
 import Network.AWS.Data (fromText, ToText (..))

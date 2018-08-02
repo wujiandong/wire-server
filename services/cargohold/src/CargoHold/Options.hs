@@ -9,7 +9,6 @@ import CargoHold.CloudFront (Domain (..), KeyPairId (..))
 import Control.Applicative
 import Control.Lens
 import Data.Aeson.TH
-import Data.Monoid
 import Data.Text (Text)
 import GHC.Generics
 import Options.Applicative

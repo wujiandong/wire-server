@@ -7,7 +7,6 @@ import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Retry
 import Data.ByteString.Lazy (isPrefixOf)
-import Data.Monoid
 import Database.Redis.IO
 
 retry :: (MonadIO m, MonadMask m) => RetryPolicyM m -> m a -> m a

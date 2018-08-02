@@ -12,7 +12,6 @@ import Brig.Types.Activation
 import Brig.Types.User
 import Data.Aeson
 import Data.Aeson.Types
-import Data.Monoid
 import Data.Typeable
 import Test.Brig.Types.Arbitrary ()
 import Test.QuickCheck

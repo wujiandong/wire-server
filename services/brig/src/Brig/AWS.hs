@@ -48,7 +48,6 @@ import Control.Monad.Trans.Resource
 import Control.Retry
 import Data.Aeson hiding ((.=))
 import Data.Foldable (for_)
-import Data.Monoid
 import Data.Text (Text, isPrefixOf)
 import Data.Typeable
 import Data.UUID

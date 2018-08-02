@@ -43,7 +43,6 @@ import Control.Monad.Catch (MonadCatch, MonadThrow, MonadMask)
 import Control.Monad.Reader
 import Control.Monad.Trans.Resource (ResourceT, runResourceT, transResourceT)
 import Data.Metrics.Middleware (Metrics)
-import Data.Monoid
 import Data.Text (Text)
 import Network.HTTP.Client (ManagerSettings (..), responseTimeoutMicro)
 import Network.HTTP.Client.OpenSSL

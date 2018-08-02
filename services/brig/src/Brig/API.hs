@@ -35,7 +35,6 @@ import Data.Id
 import Data.Int
 import Data.Metrics.Middleware hiding (metrics)
 import Data.Misc (IpAddr (..))
-import Data.Monoid ((<>))
 import Data.Range
 import Data.Text (Text, unpack)
 import Data.Text.Encoding (decodeLatin1)

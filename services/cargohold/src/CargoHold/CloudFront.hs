@@ -19,7 +19,6 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Builder
 import Data.ByteString.Lazy (toStrict)
 import Data.ByteString.Conversion
-import Data.Monoid
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time.Clock.POSIX

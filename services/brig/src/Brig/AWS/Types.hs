@@ -19,7 +19,6 @@ module Brig.AWS.Types
 import Brig.Types (Email (..))
 import Data.Aeson
 import Data.Id
-import Data.Monoid ((<>))
 import Data.Text (Text)
 
 -------------------------------------------------------------------------------
