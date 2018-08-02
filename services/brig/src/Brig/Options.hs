@@ -475,6 +475,6 @@ providerIdOption = readerAsk >>=
 smtpConnTypeOption :: Mod OptionFields String -> Parser SMTPConnType
 smtpConnTypeOption =
     fmap
-        (fromMaybe (error "Ensure proper STMP conn type is used") .
-        Y.decode . pack) .
+        (either (\e -> error ("Ensure proper STMP conn type is used: " <> show e)) id .
+        Y.decodeEither' . pack) .
     strOption

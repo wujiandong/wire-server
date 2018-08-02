@@ -30,7 +30,7 @@ import Data.Aeson.Lens
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Monoid
 import Data.Text (pack, stripSuffix, unpack)
-import Database.CQL.IO
+import Database.CQL.IO hiding (values)
 import Network.Wreq
 
 initialContacts :: MonadIO m => String -> String -> m (NonEmpty String)
