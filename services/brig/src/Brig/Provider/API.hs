@@ -613,10 +613,14 @@ searchServiceProfiles (Nothing ::: Nothing ::: _) =
 searchTeamServiceProfiles
     :: UserId ::: TeamId ::: Maybe (Range 1 128 Text) ::: Range 10 100 Int32
     -> Handler Response
-searchTeamServiceProfiles (u ::: t ::: prefix ::: size) = do
-    member <- lift $ RPC.getTeamMember u t
-    unless (isJust member) $
+searchTeamServiceProfiles (uid ::: tid ::: prefix ::: size) = do
+    -- Check that the user actually belong to the team they claim they
+    -- belong to. (Note: the 'tid' team might not even exist but we'll throw
+    -- 'insufficientTeamPermissions' anyway)
+    teamId <- lift $ User.lookupUserTeam uid
+    unless (Just tid == teamId) $
         throwStd insufficientTeamPermissions
+    -- Get search results
     ss <- DB.paginateServiceNames prefix (fromRange size) =<<
           setProviderSearchFilter <$> view settings
     return (json ss)
