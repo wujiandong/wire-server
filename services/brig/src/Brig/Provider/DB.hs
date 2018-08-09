@@ -280,6 +280,7 @@ deleteService pid sid name tags =  retry x5 $ batch $ do
     addPrepQuery cql (pid, sid)
     deleteServicePrefix sid name
     deleteServiceTags pid sid name tags
+    deleteServiceWhitelist Nothing pid sid
   where
     cql :: PrepQuery W (ProviderId, ServiceId) ()
     cql = "DELETE FROM service WHERE provider = ? AND id = ?"
@@ -381,7 +382,7 @@ updateServiceConn pid sid url tokens keys enabled = retry x5 $ batch $ do
     cqlEnabled = "UPDATE service SET enabled = ? WHERE provider = ? AND id = ?"
 
 --------------------------------------------------------------------------------
--- Service "Indexes" (tag and prefix)
+-- Service "Indexes" (tag and prefix); contain only enabled services
 
 insertServiceIndexes :: MonadClient m
                      => ProviderId
@@ -396,31 +397,20 @@ insertServiceIndexes pid sid name tags =
         insertServicePrefix pid sid name
         insertServiceTags pid sid name tags
 
-deleteServiceIndexes :: MonadClient m
-                     => ProviderId
-                     -> ServiceId
-                     -> Name
-                     -> RangedServiceTags
-                     -> m ()
-deleteServiceIndexes pid sid name tags =
+deleteServiceIndexesAndWhitelist
+    :: MonadClient m
+    => ProviderId
+    -> ServiceId
+    -> Name
+    -> RangedServiceTags
+    -> m ()
+deleteServiceIndexesAndWhitelist pid sid name tags =
     retry x5 $ batch $ do
         setConsistency Quorum
         setType BatchLogged
         deleteServicePrefix sid name
         deleteServiceTags pid sid name tags
-
-updateServiceIndexes :: MonadClient m
-                     => ProviderId
-                     -> ServiceId
-                     -> (Name, RangedServiceTags) -- ^ Name and tags to remove.
-                     -> (Name, RangedServiceTags) -- ^ Name and tags to add.
-                     -> m ()
-updateServiceIndexes pid sid (oldName, oldTags) (newName, newTags) =
-    retry x5 $ batch $ do
-        setConsistency Quorum
-        setType BatchLogged
-        updateServicePrefix pid sid oldName newName
-        updateServiceTags pid sid (oldName, oldTags) (newName, newTags)
+        deleteServiceWhitelist Nothing pid sid
 
 --------------------------------------------------------------------------------
 -- Service Tag "Index"
@@ -625,7 +615,42 @@ resolveRow :: MonadClient m => IndexRow -> m (Maybe ServiceProfile)
 resolveRow (_, pid, sid) = lookupServiceProfile pid sid
 
 --------------------------------------------------------------------------------
+-- Service whitelist
+
+insertServiceWhitelist
+    :: TeamId
+    -> ProviderId
+    -> ServiceId
+    -> BatchM ()
+insertServiceWhitelist tid pid sid =
+    addPrepQuery cql (tid, pid, sid)
+  where
+    cql :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    cql = "INSERT INTO service_whitelist \
+          \(team, provider, service) \
+          \VALUES (?, ?, ?)"
+
+deleteServiceWhitelist
+    :: Maybe TeamId
+    -> ProviderId
+    -> ServiceId
+    -> BatchM ()
+deleteServiceWhitelist Nothing pid sid =
+    addPrepQuery cql (pid, sid)
+  where
+    cql :: PrepQuery W (ProviderId, ServiceId) ()
+    cql = "DELETE FROM service_whitelist \
+          \WHERE provider = ? AND service = ?"
+deleteServiceWhitelist (Just tid) pid sid =
+    addPrepQuery cql (tid, pid, sid)
+  where
+    cql :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    cql = "DELETE FROM service_whitelist \
+          \WHERE team = ? AND provider = ? AND service = ?"
+
+--------------------------------------------------------------------------------
 -- Utilities
+
 mkPrefixIndex :: Name -> Text
 mkPrefixIndex = Text.toLower . Text.take 1 . fromName
 
