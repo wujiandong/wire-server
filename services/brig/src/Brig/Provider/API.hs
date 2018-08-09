@@ -607,12 +607,7 @@ searchServiceProfiles (Just tags ::: start ::: size) = do
 searchServiceProfiles (Nothing ::: Nothing ::: _) =
     throwStd $ badRequest "At least `tags` or `start` must be provided."
 
--- TODO: this endpoint doesn't do what it says it does. It's being added now
--- purely to make testing easier for clients.
---
--- Before going to production, it needs to start considering the whitelist.
--- It would be also quite nice to have both "start" and "prefix" here to
--- make pagination work in the future.
+-- NB: unlike 'searchServiceProfiles', we don't filter by service provider here
 searchTeamServiceProfiles
     :: UserId ::: TeamId ::: Maybe (Range 1 128 Text) ::: Range 10 100 Int32
     -> Handler Response
@@ -624,9 +619,7 @@ searchTeamServiceProfiles (uid ::: tid ::: prefix ::: size) = do
     unless (Just tid == teamId) $
         throwStd insufficientTeamPermissions
     -- Get search results
-    ss <- DB.paginateServiceNames prefix (fromRange size) =<<
-          setProviderSearchFilter <$> view settings
-    return (json ss)
+    json <$> DB.paginateServiceWhitelist tid prefix (fromRange size)
 
 getServiceTagList :: () -> Handler Response
 getServiceTagList _ = return (json (ServiceTagList allTags))

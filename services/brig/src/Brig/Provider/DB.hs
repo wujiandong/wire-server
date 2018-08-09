@@ -21,7 +21,7 @@ import Data.Functor.Identity
 import Data.Id
 import Data.Int
 import Data.List1 (List1)
-import Data.List (unfoldr, minimumBy, uncons)
+import Data.List (unfoldr, minimumBy, uncons, sortOn)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Misc
 import Data.Range (Range, fromRange, rnil, rcast)
@@ -647,6 +647,36 @@ deleteServiceWhitelist (Just tid) pid sid =
     cql :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
     cql = "DELETE FROM service_whitelist \
           \WHERE team = ? AND provider = ? AND service = ?"
+
+paginateServiceWhitelist
+    :: MonadClient m
+    => TeamId                      -- ^ Team for which to list the services
+    -> Maybe (Range 1 128 Text)    -- ^ Prefix
+    -> Int32                       -- ^ Page size limit
+    -> m ServiceProfilePage
+paginateServiceWhitelist tid mbPrefix size = liftClient $ do
+    -- if no prefix: query all with pagination, resolve
+    -- if prefix: query all, resolve, filter, trim, sort
+    case mbPrefix of
+        -- If no prefix: get first $(size+1) services and resolve them
+        Nothing -> do
+            p <- retry x1 $ paginate cql $ paramsP One (Identity tid) (size + 1)
+            r <- mapConcurrently (uncurry lookupServiceProfile) (trim size (result p))
+            return $! ServiceProfilePage (hasMore p) (catMaybes r)
+        -- If we have to filter by prefix: get all services, resolve them, then filter and sort
+        Just prefix -> do
+            let prefix' = toLower (fromRange prefix)
+            p <- retry x1 $ query cql $ params One (Identity tid)
+            r <- catMaybes <$> mapConcurrently (uncurry lookupServiceProfile) p
+            let r' = filter ((prefix' `isPrefixOf`) . toLower . fromName . serviceProfileName) r
+            return $! ServiceProfilePage
+                          (length r' > fromIntegral size)
+                          (sortOn (toLower . fromName . serviceProfileName) r')
+  where
+    cql :: PrepQuery R (Identity TeamId) (ProviderId, ServiceId)
+    cql = "SELECT provider, service \
+          \FROM service_whitelist \
+          \WHERE team = ?"
 
 --------------------------------------------------------------------------------
 -- Utilities
