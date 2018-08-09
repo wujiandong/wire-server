@@ -22,7 +22,7 @@ import Data.Id
 import Data.Int
 import Data.List1 (List1)
 import Data.List (unfoldr, minimumBy, uncons, sortOn)
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (isJust, catMaybes, fromMaybe, mapMaybe)
 import Data.Misc
 import Data.Range (Range, fromRange, rnil, rcast)
 import Data.Text (Text, toLower, isPrefixOf)
@@ -617,36 +617,44 @@ resolveRow (_, pid, sid) = lookupServiceProfile pid sid
 --------------------------------------------------------------------------------
 -- Service whitelist
 
-insertServiceWhitelist
-    :: TeamId
-    -> ProviderId
-    -> ServiceId
-    -> BatchM ()
-insertServiceWhitelist tid pid sid =
-    addPrepQuery cql (tid, pid, sid)
-  where
-    cql :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
-    cql = "INSERT INTO service_whitelist \
-          \(team, provider, service) \
-          \VALUES (?, ?, ?)"
+insertServiceWhitelist :: TeamId -> ProviderId -> ServiceId -> BatchM ()
+insertServiceWhitelist tid pid sid = addPrepQuery insertServiceWhitelistQ (tid, pid, sid)
 
-deleteServiceWhitelist
-    :: Maybe TeamId
-    -> ProviderId
-    -> ServiceId
-    -> BatchM ()
+insertServiceWhitelistC :: MonadClient m => TeamId -> ProviderId -> ServiceId -> m ()
+insertServiceWhitelistC tid pid sid =
+    retry x5 $ write insertServiceWhitelistQ $ params Quorum (tid, pid, sid)
+
+insertServiceWhitelistQ :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+insertServiceWhitelistQ =
+    "INSERT INTO service_whitelist \
+    \(team, provider, service) \
+    \VALUES (?, ?, ?)"
+
+--
+
+deleteServiceWhitelist :: Maybe TeamId -> ProviderId -> ServiceId -> BatchM ()
 deleteServiceWhitelist Nothing pid sid =
-    addPrepQuery cql (pid, sid)
-  where
-    cql :: PrepQuery W (ProviderId, ServiceId) ()
-    cql = "DELETE FROM service_whitelist \
-          \WHERE provider = ? AND service = ?"
+    addPrepQuery deleteServiceWhitelistEverywhereQ (pid, sid)
 deleteServiceWhitelist (Just tid) pid sid =
-    addPrepQuery cql (tid, pid, sid)
-  where
-    cql :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
-    cql = "DELETE FROM service_whitelist \
-          \WHERE team = ? AND provider = ? AND service = ?"
+    addPrepQuery deleteServiceWhitelistQ (tid, pid, sid)
+
+deleteServiceWhitelistC :: MonadClient m => Maybe TeamId -> ProviderId -> ServiceId -> m ()
+deleteServiceWhitelistC Nothing pid sid =
+    retry x5 $ write deleteServiceWhitelistEverywhereQ $ params Quorum (pid, sid)
+deleteServiceWhitelistC (Just tid) pid sid =
+    retry x5 $ write deleteServiceWhitelistQ $ params Quorum (tid, pid, sid)
+
+deleteServiceWhitelistQ :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+deleteServiceWhitelistQ =
+    "DELETE FROM service_whitelist \
+    \WHERE team = ? AND provider = ? AND service = ?"
+
+deleteServiceWhitelistEverywhereQ :: PrepQuery W (ProviderId, ServiceId) ()
+deleteServiceWhitelistEverywhereQ =
+    "DELETE FROM service_whitelist \
+    \WHERE provider = ? AND service = ?"
+
+--
 
 paginateServiceWhitelist
     :: MonadClient m
@@ -677,6 +685,20 @@ paginateServiceWhitelist tid mbPrefix size = liftClient $ do
     cql = "SELECT provider, service \
           \FROM service_whitelist \
           \WHERE team = ?"
+
+getServiceWhitelistStatus
+    :: MonadClient m
+    => TeamId
+    -> ProviderId
+    -> ServiceId
+    -> m Bool
+getServiceWhitelistStatus tid pid sid = liftClient $ do
+    fmap isJust $ retry x1 $ query1 cql $ params One (tid, pid, sid)
+  where
+    cql :: PrepQuery R (TeamId, ProviderId, ServiceId) (Identity TeamId)
+    cql = "SELECT team \
+          \FROM service_whitelist \
+          \WHERE team = ? AND provider = ? AND service = ?"
 
 --------------------------------------------------------------------------------
 -- Utilities

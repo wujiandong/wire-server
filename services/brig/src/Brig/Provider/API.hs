@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Brig.Provider.API (routes) where
 
@@ -45,7 +46,7 @@ import Galley.Types (Conversation (..), ConvType (..), ConvMembers (..))
 import Galley.Types (OtherMember (..))
 import Galley.Types (Event, userClients)
 import Galley.Types.Bot (newServiceRef)
-import Galley.Types.Teams (managedConversation)
+import Galley.Types.Teams (managedConversation, hasFullPermissions)
 import Data.Traversable (forM)
 import Network.HTTP.Types.Status
 import Network.Wai (Request, Response)
@@ -225,6 +226,14 @@ routes = do
         .&. capture "tid"
         .&. opt (query "prefix")
         .&. def (unsafeRange 20) (query "size")
+
+    post "/teams/:tid/services/whitelist" (continue updateServiceWhitelist) $
+        contentType "application" "json"
+        .&> accept "application" "json"
+        .&> zauth ZAuthAccess
+        .&> zauthUserId
+        .&. capture "tid"
+        .&. request
 
     post "/conversations/:cnv/bots" (continue addBot) $
         contentType "application" "json"
@@ -625,6 +634,32 @@ getServiceTagList :: () -> Handler Response
 getServiceTagList _ = return (json (ServiceTagList allTags))
   where
     allTags = [(minBound :: ServiceTag) ..]
+
+updateServiceWhitelist :: UserId ::: TeamId ::: Request -> Handler Response
+updateServiceWhitelist (uid ::: tid ::: req) = do
+    upd :: UpdateServiceWhitelist <- parseJsonBody req
+    let pid = updateServiceWhitelistProvider upd
+        sid = updateServiceWhitelistService upd
+        newWhitelisted = updateServiceWhitelistStatus upd
+    member <- lift $ RPC.getTeamMember uid tid
+    unless (maybe False hasFullPermissions member) $
+        throwStd insufficientTeamPermissions
+    service <- maybeServiceNotFound =<< DB.lookupServiceProfile pid sid
+    when (not (serviceProfileEnabled service)) $
+        throwStd serviceDisabled
+    whitelisted <- DB.getServiceWhitelistStatus tid pid sid
+    case (whitelisted, newWhitelisted) of
+        (False, False) -> return (setStatus status204 empty)
+        (True,  True)  -> return (setStatus status204 empty)
+        (False, True)  -> do
+            DB.insertServiceWhitelistC tid pid sid
+            return (setStatus status200 empty)
+            -- TODO send events
+        (True, False)  -> do
+            DB.deleteServiceWhitelistC (Just tid) pid sid
+            return (setStatus status200 empty)
+            -- TODO send events
+            -- TODO remove service from conversations
 
 addBot :: UserId ::: ConnId ::: ConvId ::: Request -> Handler Response
 addBot (zuid ::: zcon ::: cid ::: req) = do

@@ -598,6 +598,28 @@ instance ToJSON DeleteService where
         ]
 
 --------------------------------------------------------------------------------
+-- UpdateServiceWhitelist
+
+data UpdateServiceWhitelist = UpdateServiceWhitelist
+    { updateServiceWhitelistProvider :: !ProviderId
+    , updateServiceWhitelistService  :: !ServiceId
+    , updateServiceWhitelistStatus   :: !Bool
+    }
+
+instance FromJSON UpdateServiceWhitelist where
+    parseJSON = withObject "UpdateServiceWhitelist" $ \o ->
+        UpdateServiceWhitelist <$> o .: "provider"
+                               <*> o .: "id"
+                               <*> o .: "whitelisted"
+
+instance ToJSON UpdateServiceWhitelist where
+    toJSON u = object
+        [ "provider" .= updateServiceWhitelistProvider u
+        , "id"       .= updateServiceWhitelistService u
+        , "status"   .= updateServiceWhitelistStatus u
+        ]
+
+--------------------------------------------------------------------------------
 -- AddBot
 
 -- | Input data for adding a bot to a conversation.

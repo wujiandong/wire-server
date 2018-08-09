@@ -51,6 +51,7 @@ module Galley.Types.Teams
     , newPermissions
     , fullPermissions
     , hasPermission
+    , hasFullPermissions
     , self
     , copy
 
@@ -291,6 +292,10 @@ fullPermissions = let p = intToPerms maxBound in Permissions p p
 
 hasPermission :: TeamMember -> Perm -> Bool
 hasPermission tm p = p `Set.member` (tm^.permissions.self)
+
+-- | Indicates a team owner.
+hasFullPermissions :: TeamMember -> Bool
+hasFullPermissions tm = fullPermissions == (tm^.permissions)
 
 permToInt :: Perm -> Word64
 permToInt CreateConversation       = 0x0001
