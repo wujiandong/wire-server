@@ -397,20 +397,18 @@ insertServiceIndexes pid sid name tags =
         insertServicePrefix pid sid name
         insertServiceTags pid sid name tags
 
-deleteServiceIndexesAndWhitelist
-    :: MonadClient m
-    => ProviderId
-    -> ServiceId
-    -> Name
-    -> RangedServiceTags
-    -> m ()
-deleteServiceIndexesAndWhitelist pid sid name tags =
+deleteServiceIndexes :: MonadClient m
+                     => ProviderId
+                     -> ServiceId
+                     -> Name
+                     -> RangedServiceTags
+                     -> m ()
+deleteServiceIndexes pid sid name tags =
     retry x5 $ batch $ do
         setConsistency Quorum
         setType BatchLogged
         deleteServicePrefix sid name
         deleteServiceTags pid sid name tags
-        deleteServiceWhitelist Nothing pid sid
 
 --------------------------------------------------------------------------------
 -- Service Tag "Index"

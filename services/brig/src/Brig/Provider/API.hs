@@ -503,8 +503,7 @@ updateService (pid ::: sid ::: req) = do
     let newSummary = fromRange <$> updateServiceSummary upd
     let newDescr   = fromRange <$> updateServiceDescr upd
     let newAssets  = updateServiceAssets upd
-    -- Update service, and update tags/prefix indices if the service is
-    -- enabled (those indices only contain enabled services)
+    -- Update service, tags/prefix index if the service is enabled
     DB.updateService pid sid name tags nameChange newSummary newDescr newAssets tagsChange (serviceEnabled svc)
 
     return empty
@@ -538,17 +537,15 @@ updateServiceConn (pid ::: sid ::: req) = do
 
     when (sconEnabled scon || sconEnabled scon') $ do
         lift $ RPC.setServiceConn scon'
-        -- If the service got enabled or disabled, update auxiliary tables
-        unless (sconEnabled scon == sconEnabled scon') $ do
+        -- If the service got enabled or disabled, update the tag index.
+        unless (sconEnabled scon && sconEnabled scon') $ do
             svc <- DB.lookupServiceProfile pid sid >>= maybeServiceNotFound
             let name = serviceProfileName svc
             let tags = unsafeRange (serviceProfileTags svc)
-            -- When enabling the service, add it to the indices to make it
-            -- visible in search; when disabling it, remove if from the
-            -- indices *and* the whitelist
-            if sconEnabled scon'
-               then DB.insertServiceIndexes pid sid name tags
-               else DB.deleteServiceIndexesAndWhitelist pid sid name tags
+            -- Update index, make it visible over search
+            if sconEnabled scon
+                then DB.deleteServiceIndexes pid sid name tags
+                else DB.insertServiceIndexes pid sid name tags
 
     -- TODO: Send informational email to provider.
 
@@ -644,9 +641,6 @@ updateServiceWhitelist (uid ::: tid ::: req) = do
     member <- lift $ RPC.getTeamMember uid tid
     unless (maybe False hasFullPermissions member) $
         throwStd insufficientTeamPermissions
-    service <- maybeServiceNotFound =<< DB.lookupServiceProfile pid sid
-    when (not (serviceProfileEnabled service)) $
-        throwStd serviceDisabled
     whitelisted <- DB.getServiceWhitelistStatus tid pid sid
     case (whitelisted, newWhitelisted) of
         (False, False) -> return (setStatus status204 empty)
