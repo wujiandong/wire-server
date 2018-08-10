@@ -678,6 +678,10 @@ addBot (zuid ::: zcon ::: cid ::: req) = do
     unless (sconEnabled scon) $
         throwStd serviceDisabled
     svp <- DB.lookupServiceProfile pid sid >>= maybeServiceNotFound
+    for_ (cnvTeam cnv) $ \tid -> do
+        whitelisted <- DB.getServiceWhitelistStatus tid pid sid
+        unless whitelisted $
+            throwStd serviceNotWhitelisted
 
     -- Prepare a user ID, client ID and token for the bot.
     bid <- BotId <$> randomId
@@ -924,6 +928,9 @@ tooManyBots = Wai.Error status409 "too-many-bots" "Maximum number of bots for th
 
 serviceDisabled :: Wai.Error
 serviceDisabled = Wai.Error status403 "service-disabled" "The desired service is currently disabled."
+
+serviceNotWhitelisted :: Wai.Error
+serviceNotWhitelisted = Wai.Error status403 "service-not-whitelisted" "The desired service is not on the whitelist of allowed services for this team."
 
 serviceError :: RPC.ServiceError -> Wai.Error
 serviceError RPC.ServiceUnavailable = badGateway
