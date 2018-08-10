@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Brig.Provider.API (routes) where
@@ -23,7 +24,7 @@ import Brig.Types.Client
 import Brig.Types.User (publicProfile, User (..), Pict (..))
 import Brig.Types.Provider
 import Brig.Types.Search
-import Control.Lens (view)
+import Control.Lens (view, (&), (.~), (<&>))
 import Control.Error (throwE)
 import Control.Exception.Enclosed (handleAny)
 import Control.Monad (join, when, unless, (>=>), liftM2)
@@ -34,7 +35,7 @@ import Data.Foldable (for_, forM_)
 import Data.Hashable (hash)
 import Data.Id
 import Data.Int
-import Data.List1 (List1 (..))
+import Data.List1 (List1 (..), singleton, list1)
 import Data.List.NonEmpty (nonEmpty)
 import Data.Maybe
 import Data.Misc (Fingerprint (..), Rsa)
@@ -46,8 +47,9 @@ import Galley.Types (Conversation (..), ConvType (..), ConvMembers (..))
 import Galley.Types (OtherMember (..))
 import Galley.Types (Event, userClients)
 import Galley.Types.Bot (newServiceRef)
-import Galley.Types.Teams (managedConversation, hasFullPermissions)
 import Data.Traversable (forM)
+import Data.Time (getCurrentTime)
+import Data.Json.Util (toJSONObject)
 import Network.HTTP.Types.Status
 import Network.Wai (Request, Response)
 import Network.Wai.Predicate (contentType, accept, request, query, def, opt)
@@ -66,6 +68,7 @@ import qualified Brig.IO.Intra                as RPC
 import qualified Brig.Provider.DB             as DB
 import qualified Brig.Provider.RPC            as RPC
 import qualified Brig.Types.Provider.External as Ext
+import qualified Data.Aeson                   as Aeson
 import qualified Data.ByteString.Lazy.Char8   as LC8
 import qualified Data.List                    as List
 import qualified Data.Map.Strict              as Map
@@ -79,7 +82,9 @@ import qualified Network.HTTP.Client.OpenSSL  as SSL
 import qualified Data.Text.Encoding           as Text
 import qualified Network.Wai.Utilities.Error  as Wai
 import qualified Brig.ZAuth                   as ZAuth
-
+import qualified Galley.Types.Teams           as Teams
+import qualified System.Logger.Class          as Log
+import qualified Gundeck.Types.Push.V2        as Push
 
 routes :: Routes Doc.ApiBuilder Handler ()
 routes = do
@@ -639,7 +644,7 @@ updateServiceWhitelist (uid ::: tid ::: req) = do
         sid = updateServiceWhitelistService upd
         newWhitelisted = updateServiceWhitelistStatus upd
     member <- lift $ RPC.getTeamMember uid tid
-    unless (maybe False hasFullPermissions member) $
+    unless (maybe False Teams.hasFullPermissions member) $
         throwStd insufficientTeamPermissions
     whitelisted <- DB.getServiceWhitelistStatus tid pid sid
     case (whitelisted, newWhitelisted) of
@@ -647,13 +652,29 @@ updateServiceWhitelist (uid ::: tid ::: req) = do
         (True,  True)  -> return (setStatus status204 empty)
         (False, True)  -> do
             DB.insertServiceWhitelistC tid pid sid
+            getOwners >>= mapM_ (\owners -> do
+                now <- liftIO getCurrentTime
+                let event = Teams.newEvent Teams.ServiceWhitelistAdd tid now
+                          & Teams.eventData .~ Just (Teams.EdServiceWhitelistAdd pid sid)
+                lift $ RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing)
+            -- TODO return the event?
             return (setStatus status200 empty)
-            -- TODO send events
         (True, False)  -> do
             DB.deleteServiceWhitelistC (Just tid) pid sid
+            getOwners >>= mapM_ (\owners -> do
+                now <- liftIO getCurrentTime
+                let event = Teams.newEvent Teams.ServiceWhitelistRemove tid now
+                          & Teams.eventData .~ Just (Teams.EdServiceWhitelistRemove pid sid)
+                lift $ RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing)
+            -- TODO return the event?
             return (setStatus status200 empty)
-            -- TODO send events
             -- TODO remove service from conversations
+  where
+    mkEventList event = singleton ( Log.bytes (Aeson.encode event)
+                                  , (toJSONObject event, Nothing) )
+    getOwners = lift (RPC.getTeamOwners tid) <&> \case
+        [] -> Nothing
+        x:xs -> Just (fmap (view Teams.userId) (list1 x xs))
 
 addBot :: UserId ::: ConnId ::: ConvId ::: Request -> Handler Response
 addBot (zuid ::: zcon ::: cid ::: req) = do
@@ -726,7 +747,7 @@ addBot (zuid ::: zcon ::: cid ::: req) = do
   where
     ensureNotManagedConv tid = do
         tc <- lift (RPC.getTeamConv zuid tid cid) >>= maybeConvNotFound
-        when (view managedConversation tc) $
+        when (view Teams.managedConversation tc) $
             throwStd invalidConv
 
 removeBot :: UserId ::: ConnId ::: ConvId ::: BotId -> Handler Response

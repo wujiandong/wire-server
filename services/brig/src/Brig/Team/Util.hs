@@ -15,7 +15,7 @@ data TeamOwnershipStatus = IsOnlyTeamOwner | IsOneOfManyTeamOwners | IsNotTeamOw
 
 -- | A team owner is a team member with full permissions *and* an email address.
 teamOwnershipStatus :: UserId -> TeamId -> AppIO TeamOwnershipStatus
-teamOwnershipStatus uid tid = teamOwnershipStatus' uid . fmap (^. userId) <$> Intra.getTeamOwners tid
+teamOwnershipStatus uid tid = teamOwnershipStatus' uid . fmap (^. userId) <$> Intra.getTeamOwnersWithEmail tid
 
 teamOwnershipStatus' :: UserId -> [UserId] -> TeamOwnershipStatus
 teamOwnershipStatus' _ [] = NoTeamOwnersAreLeft
