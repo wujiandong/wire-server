@@ -233,10 +233,10 @@ routes = do
         .&. def (unsafeRange 20) (query "size")
 
     post "/teams/:tid/services/whitelist" (continue updateServiceWhitelist) $
-        contentType "application" "json"
-        .&> accept "application" "json"
+        accept "application" "json"
         .&> zauth ZAuthAccess
         .&> zauthUserId
+        .&. zauthConnId
         .&. capture "tid"
         .&. request
 
@@ -637,8 +637,8 @@ getServiceTagList _ = return (json (ServiceTagList allTags))
   where
     allTags = [(minBound :: ServiceTag) ..]
 
-updateServiceWhitelist :: UserId ::: TeamId ::: Request -> Handler Response
-updateServiceWhitelist (uid ::: tid ::: req) = do
+updateServiceWhitelist :: UserId ::: ConnId ::: TeamId ::: Request -> Handler Response
+updateServiceWhitelist (uid ::: conn ::: tid ::: req) = do
     upd :: UpdateServiceWhitelist <- parseJsonBody req
     let pid = updateServiceWhitelistProvider upd
         sid = updateServiceWhitelistService upd
@@ -652,13 +652,11 @@ updateServiceWhitelist (uid ::: tid ::: req) = do
         (True,  True)  -> return (setStatus status204 empty)
         (False, True)  -> do
             DB.insertServiceWhitelistC tid pid sid
-            lift $ notifyServiceWhitelistUpdate tid uid pid sid True
-            -- TODO return the event?
+            lift $ notifyServiceWhitelistUpdate tid uid conn pid sid True
             return (setStatus status200 empty)
         (True, False)  -> do
             DB.deleteServiceWhitelistC (Just tid) pid sid
-            lift $ notifyServiceWhitelistUpdate tid uid pid sid False
-            -- TODO return the event?
+            lift $ notifyServiceWhitelistUpdate tid uid conn pid sid False
             return (setStatus status200 empty)
             -- TODO remove service from conversations
 
@@ -862,11 +860,12 @@ validateServiceKey pem = liftIO $ readPublicKey >>= \pk ->
 notifyServiceWhitelistUpdate
     :: TeamId
     -> UserId        -- ^ The user who caused the whitelist to change
+    -> ConnId        -- ^ Originating connection
     -> ProviderId
     -> ServiceId
     -> Bool          -- ^ True=added, False=removed
     -> AppIO ()
-notifyServiceWhitelistUpdate tid uid pid sid status = do
+notifyServiceWhitelistUpdate tid uid conn pid sid status = do
     mbOwners <- RPC.getTeamOwners tid
     case mbOwners of
         [] -> pure ()
@@ -875,7 +874,7 @@ notifyServiceWhitelistUpdate tid uid pid sid status = do
             now <- liftIO getCurrentTime
             let event = Teams.newEvent eventType tid now
                           & Teams.eventData .~ Just eventData
-            RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing
+            RPC.rawPush (mkEventList event) owners uid Push.RouteAny (Just conn)
   where
     mkEventList event = singleton ( Log.bytes (Aeson.encode event)
                                   , (toJSONObject event, Nothing) )
