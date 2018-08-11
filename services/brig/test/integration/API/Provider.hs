@@ -621,9 +621,6 @@ testListServiceWhitelistEnabled = undefined
 
 testSearchServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testSearchServiceWhitelist config db brig galley = do
-    -- TODO actual whitelisting
-    -- TODO reuse tests from 'testListServices' since the implementation of the new endpoint
-    --      is going to be different enough that running those tests will make sense
     prv <- randomProvider db brig
     let pid = providerId prv
 
