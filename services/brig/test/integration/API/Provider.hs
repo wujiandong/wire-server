@@ -627,17 +627,21 @@ testSearchServiceWhitelist config db brig galley = do
     prv <- randomProvider db brig
     let pid = providerId prv
 
-    -- Create services
+    -- Create a user, a team, and some random user that's not on the team
+    (uid, tid) <- Team.createUserWithTeam brig galley
+    notMember <- randomUser brig
+
+    -- Create services and add them all to the whitelist
     uniq <- UUID.toText . toUUID <$> randomId
     new  <- defNewService config
     svcs <- mapM (addGetService brig pid . mkNew new) (taggedServiceNames uniq)
-    mapM_ (enableService brig pid . serviceId) svcs
+    forM_ svcs $ \svc -> do
+        let sid = serviceId svc
+        enableService brig pid sid
+        whitelist uid tid pid sid
+
     let services :: [(ServiceId, Name)]
         services = map (serviceId &&& serviceName) svcs
-
-    -- Create a user, a team, and some random user that's not on the team
-    (member, tid) <- Team.createUserWithTeam brig galley
-    notMember <- randomUser brig
 
     -- Check that search doesn't work for the user who's not a part of the team
     listTeamServiceProfilesByPrefix brig (userId notMember) tid Nothing True 20 !!! do
@@ -650,8 +654,8 @@ testSearchServiceWhitelist config db brig galley = do
     -- the case since in this test we won't have any disabled services.
     let search :: Maybe Text -> Http ServiceProfilePage
         search mbName = do
-            r1 <- searchServiceWhitelist    brig 20 member tid mbName
-            r2 <- searchServiceWhitelistAll brig 20 member tid mbName
+            r1 <- searchServiceWhitelist    brig 20 uid tid mbName
+            r2 <- searchServiceWhitelistAll brig 20 uid tid mbName
             liftIO $ assertEqual
                 ("search for " <> show mbName <> " with and without filtering")
                 r1 r2
@@ -666,6 +670,7 @@ testSearchServiceWhitelist config db brig galley = do
         uniq2 <- UUID.toText . toUUID <$> randomId
         svc2 <- addGetService brig pid (mkNew new (Name (uniq2 <> "|Extra"), [PollTag]))
         enableService brig pid (serviceId svc2)
+        whitelist uid tid pid (serviceId svc2)
         page <- search Nothing
         liftIO $ assertEqual "page length" 20 (length (serviceProfilePageResults page))
         liftIO $ assertEqual "has more" True (serviceProfilePageHasMore page)
@@ -673,6 +678,9 @@ testSearchServiceWhitelist config db brig galley = do
     mkNew new (n, t) = new { newServiceName = n
                            , newServiceTags = unsafeRange (Set.fromList t)
                            }
+    whitelist uid tid pid sid =
+        updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True)
+            !!! const 200 === statusCode
 
 --------------------------------------------------------------------------------
 -- API Operations
@@ -847,6 +855,20 @@ updateServiceConn brig pid sid upd = put $ brig
     . paths ["provider", "services", toByteString' sid, "connection"]
     . header "Z-Type" "provider"
     . header "Z-Provider" (toByteString' pid)
+    . contentJson
+    . body (RequestBodyLBS (encode upd))
+
+updateServiceWhitelist
+    :: Brig
+    -> UserId
+    -> TeamId
+    -> UpdateServiceWhitelist
+    -> Http ResponseLBS
+updateServiceWhitelist brig uid tid upd = post $ brig
+    . paths ["teams", toByteString' tid, "services", "whitelist"]
+    . header "Z-Type" "access"
+    . header "Z-User" (toByteString' uid)
+    . header "Z-Connection" "conn"
     . contentJson
     . body (RequestBodyLBS (encode upd))
 

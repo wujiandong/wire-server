@@ -614,9 +614,9 @@ instance FromJSON UpdateServiceWhitelist where
 
 instance ToJSON UpdateServiceWhitelist where
     toJSON u = object
-        [ "provider" .= updateServiceWhitelistProvider u
-        , "id"       .= updateServiceWhitelistService u
-        , "status"   .= updateServiceWhitelistStatus u
+        [ "provider"    .= updateServiceWhitelistProvider u
+        , "id"          .= updateServiceWhitelistService u
+        , "whitelisted" .= updateServiceWhitelistStatus u
         ]
 
 --------------------------------------------------------------------------------
