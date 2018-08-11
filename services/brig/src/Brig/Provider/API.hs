@@ -10,7 +10,7 @@
 
 module Brig.Provider.API (routes) where
 
-import Brig.App (settings)
+import Brig.App (settings, AppIO)
 import Brig.API.Error
 import Brig.API.Handler
 import Brig.API.Types (PasswordResetError (..))
@@ -24,7 +24,7 @@ import Brig.Types.Client
 import Brig.Types.User (publicProfile, User (..), Pict (..))
 import Brig.Types.Provider
 import Brig.Types.Search
-import Control.Lens (view, (&), (.~), (<&>))
+import Control.Lens (view, (&), (.~))
 import Control.Error (throwE)
 import Control.Exception.Enclosed (handleAny)
 import Control.Monad (join, when, unless, (>=>), liftM2)
@@ -652,29 +652,15 @@ updateServiceWhitelist (uid ::: tid ::: req) = do
         (True,  True)  -> return (setStatus status204 empty)
         (False, True)  -> do
             DB.insertServiceWhitelistC tid pid sid
-            getOwners >>= mapM_ (\owners -> do
-                now <- liftIO getCurrentTime
-                let event = Teams.newEvent Teams.ServiceWhitelistAdd tid now
-                          & Teams.eventData .~ Just (Teams.EdServiceWhitelistAdd pid sid)
-                lift $ RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing)
+            lift $ notifyServiceWhitelistUpdate tid uid pid sid True
             -- TODO return the event?
             return (setStatus status200 empty)
         (True, False)  -> do
             DB.deleteServiceWhitelistC (Just tid) pid sid
-            getOwners >>= mapM_ (\owners -> do
-                now <- liftIO getCurrentTime
-                let event = Teams.newEvent Teams.ServiceWhitelistRemove tid now
-                          & Teams.eventData .~ Just (Teams.EdServiceWhitelistRemove pid sid)
-                lift $ RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing)
+            lift $ notifyServiceWhitelistUpdate tid uid pid sid False
             -- TODO return the event?
             return (setStatus status200 empty)
             -- TODO remove service from conversations
-  where
-    mkEventList event = singleton ( Log.bytes (Aeson.encode event)
-                                  , (toJSONObject event, Nothing) )
-    getOwners = lift (RPC.getTeamOwners tid) <&> \case
-        [] -> Nothing
-        x:xs -> Just (fmap (view Teams.userId) (list1 x xs))
 
 addBot :: UserId ::: ConnId ::: ConvId ::: Request -> Handler Response
 addBot (zuid ::: zcon ::: cid ::: req) = do
@@ -870,6 +856,35 @@ validateServiceKey pem = liftIO $ readPublicKey >>= \pk ->
     readPublicKey = handleAny
         (const $ return Nothing)
         (SSL.readPublicKey (LC8.unpack (toByteString pem)) >>= return . Just)
+
+-- | Send team owners an event about a change in the services whitelist for
+-- their team.
+notifyServiceWhitelistUpdate
+    :: TeamId
+    -> UserId        -- ^ The user who caused the whitelist to change
+    -> ProviderId
+    -> ServiceId
+    -> Bool          -- ^ True=added, False=removed
+    -> AppIO ()
+notifyServiceWhitelistUpdate tid uid pid sid status = do
+    mbOwners <- RPC.getTeamOwners tid
+    case mbOwners of
+        [] -> pure ()
+        x:xs -> do
+            let owners = fmap (view Teams.userId) (list1 x xs)
+            now <- liftIO getCurrentTime
+            let event = Teams.newEvent eventType tid now
+                          & Teams.eventData .~ Just eventData
+            RPC.rawPush (mkEventList event) owners uid Push.RouteAny Nothing
+  where
+    mkEventList event = singleton ( Log.bytes (Aeson.encode event)
+                                  , (toJSONObject event, Nothing) )
+    eventType
+        | status    = Teams.ServiceWhitelistAdd
+        | otherwise = Teams.ServiceWhitelistRemove
+    eventData
+        | status    = Teams.EdServiceWhitelistAdd pid sid
+        | otherwise = Teams.EdServiceWhitelistRemove pid sid
 
 mkBotUserView :: User -> Ext.BotUserView
 mkBotUserView u = Ext.BotUserView
