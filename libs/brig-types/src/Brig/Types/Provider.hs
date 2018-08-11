@@ -475,7 +475,7 @@ data ServiceProfile = ServiceProfile
     , serviceProfileAssets   :: ![Asset]
     , serviceProfileTags     :: !(Set ServiceTag)
     , serviceProfileEnabled  :: !Bool
-    }
+    } deriving (Eq, Show)
 
 instance FromJSON ServiceProfile where
     parseJSON = withObject "ServiceProfile" $ \o ->
@@ -506,7 +506,7 @@ instance ToJSON ServiceProfile where
 data ServiceProfilePage = ServiceProfilePage
     { serviceProfilePageHasMore :: !Bool
     , serviceProfilePageResults :: ![ServiceProfile]
-    }
+    } deriving (Eq, Show)
 
 instance FromJSON ServiceProfilePage where
     parseJSON = withObject "ServiceProfilePage" $ \o ->

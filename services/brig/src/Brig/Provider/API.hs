@@ -608,6 +608,8 @@ getServiceProfile (pid ::: sid) = do
 
 -- TODO: in order to actually make it possible for clients to implement
 -- pagination here, we need both 'start' and 'prefix'.
+--
+-- Also see Note [buggy pagination].
 searchServiceProfiles :: Maybe (QueryAnyTags 1 3) ::: Maybe Text ::: Range 10 100 Int32 -> Handler Response
 searchServiceProfiles (Nothing ::: Just start ::: size) = do
     prefix <- rangeChecked start :: Handler (Range 1 128 Text)

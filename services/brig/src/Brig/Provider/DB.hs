@@ -474,6 +474,26 @@ updateServiceTags pid sid (oldName, oldTags) (newName, newTags)
 -- Used both by service_tag and service_prefix
 type IndexRow = (Name, ProviderId, ServiceId)
 
+-- Note [buggy pagination]
+-- ~~~~~~~~~~~~~~~~
+--
+-- I'm very much unsure that pagination is implemented correctly
+-- in 'paginateServiceNames' and 'paginateServiceTags'.
+--
+-- It's not obvious that it's enough to pass (size+1) and then try to figure
+-- out, in various places, whether we should flip 'hasMore' or not; and if
+-- this is implemented incorrectly, then hasMore might be false while it
+-- should be true – which will become a significant bug once clients
+-- actually start implementing pagination.
+--
+-- In addition, we certainly return less rows than we are asked for (though
+-- it's not exactly a bug), and we can even return zero rows and say "but we
+-- have more!".
+--
+-- Luckily, clients never look at hasMore. There are also some tests that
+-- break if they look at hasMore, but since hasMore is currently irrelevant,
+-- they're commented out. Grep for references to this note.
+
 -- | Note: Consistency = One
 paginateServiceTags :: MonadClient m
     => QueryAnyTags 1 3
@@ -486,6 +506,7 @@ paginateServiceTags tags start size providerFilter = liftClient $ do
     let tags' = unpackTags tags
     p <- filterResults providerFilter start' <$> queryAll start' size' tags'
     r <- mapConcurrently resolveRow (result p)
+    -- See Note [buggy pagination]
     return $! ServiceProfilePage (hasMore p) (catMaybes r)
   where
     start' = maybe "" toLower start
@@ -571,6 +592,7 @@ paginateServiceNames mbPrefix size providerFilter = liftClient $ do
             let prefix' = toLower (fromRange prefix)
             in  filterResults providerFilter prefix' <$> queryPrefixes prefix' size'
     r <- mapConcurrently resolveRow (result p)
+    -- See Note [buggy pagination]
     return $! ServiceProfilePage (hasMore p) (catMaybes r)
   where
     queryAll len = do

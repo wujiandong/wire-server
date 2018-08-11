@@ -348,6 +348,7 @@ zUser = header "Z-User" . C8.pack . show
 zConn :: ByteString -> Request -> Request
 zConn = header "Z-Connection"
 
+-- TODO: consider 'error'ing out here and using HasCallStack
 decodeBody :: FromJSON a => Response (Maybe Lazy.ByteString) -> Maybe a
 decodeBody = responseBody >=> decode'
 
