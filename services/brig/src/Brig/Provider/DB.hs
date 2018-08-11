@@ -658,31 +658,36 @@ paginateServiceWhitelist
     :: MonadClient m
     => TeamId                      -- ^ Team for which to list the services
     -> Maybe (Range 1 128 Text)    -- ^ Prefix
+    -> Bool                        -- ^ Whether to filter out disabled services
     -> Int32                       -- ^ Page size limit
     -> m ServiceProfilePage
-paginateServiceWhitelist tid mbPrefix size = liftClient $ do
-    -- if no prefix: query all with pagination, resolve
-    -- if prefix: query all, resolve, filter, trim, sort
-    case mbPrefix of
-        -- If no prefix: get first $(size+1) services and resolve them
-        Nothing -> do
-            p <- retry x1 $ paginate cql $ paramsP One (Identity tid) (size + 1)
-            r <- mapConcurrently (uncurry lookupServiceProfile) (trim size (result p))
-            return $! ServiceProfilePage (hasMore p) (catMaybes r)
-        -- If we have to filter by prefix: get all services, resolve them, then filter and sort
-        Just prefix -> do
-            let prefix' = toLower (fromRange prefix)
-            p <- retry x1 $ query cql $ params One (Identity tid)
-            r <- catMaybes <$> mapConcurrently (uncurry lookupServiceProfile) p
-            let r' = filter ((prefix' `isPrefixOf`) . toLower . fromName . serviceProfileName) r
-            return $! ServiceProfilePage
-                          (length r' > fromIntegral size)
-                          (sortOn (toLower . fromName . serviceProfileName) r')
+paginateServiceWhitelist tid mbPrefix filterDisabled size = liftClient $ do
+    -- NB: this function is rather inefficient because it queries all
+    -- services, regardless of 'size'. This is because otherwise we would
+    -- have to go through multiple passes of query->filter->query a bit
+    -- more->filter->... if we get unlucky.
+    p <- retry x1 $ query cql $ params One (Identity tid)
+    r <- maybeFilterPrefix .
+         sortOn (toLower . fromName . serviceProfileName) .
+         maybeFilterDisabled .
+         catMaybes <$>
+             mapConcurrently (uncurry lookupServiceProfile) p
+    return $! ServiceProfilePage
+                  (length r > fromIntegral size)
+                  (trim size r)
   where
     cql :: PrepQuery R (Identity TeamId) (ProviderId, ServiceId)
     cql = "SELECT provider, service \
           \FROM service_whitelist \
           \WHERE team = ?"
+    maybeFilterDisabled
+        | filterDisabled = filter serviceProfileEnabled
+        | otherwise = id
+    maybeFilterPrefix
+        | Just prefix <- mbPrefix =
+              let prefix' = toLower (fromRange prefix)
+              in  takeWhile ((prefix' `isPrefixOf`) . toLower . fromName . serviceProfileName)
+        | otherwise = id
 
 getServiceWhitelistStatus
     :: MonadClient m

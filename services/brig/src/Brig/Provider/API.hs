@@ -230,6 +230,7 @@ routes = do
         .&> zauthUserId
         .&. capture "tid"
         .&. opt (query "prefix")
+        .&. def True (query "filter_disabled")
         .&. def (unsafeRange 20) (query "size")
 
     post "/teams/:tid/services/whitelist" (continue updateServiceWhitelist) $
@@ -620,9 +621,9 @@ searchServiceProfiles (Nothing ::: Nothing ::: _) =
 
 -- NB: unlike 'searchServiceProfiles', we don't filter by service provider here
 searchTeamServiceProfiles
-    :: UserId ::: TeamId ::: Maybe (Range 1 128 Text) ::: Range 10 100 Int32
+    :: UserId ::: TeamId ::: Maybe (Range 1 128 Text) ::: Bool ::: Range 10 100 Int32
     -> Handler Response
-searchTeamServiceProfiles (uid ::: tid ::: prefix ::: size) = do
+searchTeamServiceProfiles (uid ::: tid ::: prefix ::: filterDisabled ::: size) = do
     -- Check that the user actually belong to the team they claim they
     -- belong to. (Note: the 'tid' team might not even exist but we'll throw
     -- 'insufficientTeamPermissions' anyway)
@@ -630,7 +631,7 @@ searchTeamServiceProfiles (uid ::: tid ::: prefix ::: size) = do
     unless (Just tid == teamId) $
         throwStd insufficientTeamPermissions
     -- Get search results
-    json <$> DB.paginateServiceWhitelist tid prefix (fromRange size)
+    json <$> DB.paginateServiceWhitelist tid prefix filterDisabled (fromRange size)
 
 getServiceTagList :: () -> Handler Response
 getServiceTagList _ = return (json (ServiceTagList allTags))
