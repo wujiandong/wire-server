@@ -654,11 +654,11 @@ updateServiceWhitelist (uid ::: conn ::: tid ::: req) = do
         (False, False) -> return (setStatus status204 empty)
         (True,  True)  -> return (setStatus status204 empty)
         (False, True)  -> do
-            DB.insertServiceWhitelistC tid pid sid
+            DB.insertServiceWhitelist tid pid sid
             lift $ notifyServiceWhitelistUpdate tid uid conn pid sid True
             return (setStatus status200 empty)
         (True, False)  -> do
-            DB.deleteServiceWhitelistC (Just tid) pid sid
+            DB.deleteServiceWhitelist (Just tid) pid sid
             lift $ notifyServiceWhitelistUpdate tid uid conn pid sid False
             return (setStatus status200 empty)
             -- TODO remove service from conversations

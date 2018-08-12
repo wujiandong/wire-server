@@ -528,7 +528,7 @@ testMessageBot config crt db brig galley cannon = withTestService config crt db 
     usr <- createUser "User" "success@simulator.amazonses.com" brig
     let uid = userId usr
     let new = defNewClient PermanentClient [somePrekeys !! 0] (someLastPrekeys !! 0)
-    _rs <- addClient brig usr new <!! const 201 === statusCode
+    _rs <- addClient brig uid new <!! const 201 === statusCode
     let Just uc = clientId <$> decodeBody _rs
 
     -- Create conversation
@@ -555,12 +555,13 @@ testMessageBotTeam config crt db brig galley cannon = withTestService config crt
     let sid = sref^.serviceRefId
 
     -- Prepare user with client
-    usr <- createUser "User" "success@simulator.amazonses.com" brig
-    let uid = userId usr
+    (uid, tid) <- Team.createUserWithTeam brig galley
     let new = defNewClient PermanentClient [somePrekeys !! 0] (someLastPrekeys !! 0)
-    _rs <- addClient brig usr new <!! const 201 === statusCode
+    _rs <- addClient brig uid new <!! const 201 === statusCode
     let Just uc = clientId <$> decodeBody _rs
-    tid <- Team.createTeam uid galley
+
+    -- Whitelist the bot
+    whitelistService brig uid tid pid sid
 
     -- Create conversation
     cid <- Team.createTeamConv galley tid uid [] Nothing
@@ -660,7 +661,7 @@ testSearchServiceWhitelist config db brig galley = do
     forM_ svcs $ \svc -> do
         let sid = serviceId svc
         enableService brig pid sid
-        whitelist owner tid pid sid
+        whitelistService brig owner tid pid sid
     let mkName n = Name (uniq <> "|" <> n)
 
     let services :: [(ServiceId, Name)]
@@ -686,9 +687,10 @@ testSearchServiceWhitelist config db brig galley = do
     -- Check that search works without a prefix
     do
         uniq2 <- UUID.toText . toUUID <$> randomId
-        svc2 <- addGetService brig pid (mkNew new (Name (uniq2 <> "|Extra"), [PollTag]))
-        enableService brig pid (serviceId svc2)
-        whitelist owner tid pid (serviceId svc2)
+        sid <- serviceId <$>
+            addGetService brig pid (mkNew new (Name (uniq2 <> "|Extra"), [PollTag]))
+        enableService brig pid sid
+        whitelistService brig owner tid pid sid
         page <- search Nothing
         liftIO $ assertEqual "page length" 20 (length (serviceProfilePageResults page))
         liftIO $ assertEqual "has more" True (serviceProfilePageHasMore page)
@@ -724,9 +726,6 @@ testSearchServiceWhitelist config db brig galley = do
                            , newServiceTags = unsafeRange (Set.fromList t)
                            }
     select prefix = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd)
-    whitelist uid tid pid sid =
-        updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True)
-            !!! const 200 === statusCode
 
 --------------------------------------------------------------------------------
 -- API Operations
@@ -1106,6 +1105,18 @@ enableService brig pid sid = do
             { updateServiceConnEnabled  = Just True
             }
     updateServiceConn brig pid sid upd !!!
+        const 200 === statusCode
+
+whitelistService
+    :: HasCallStack
+    => Brig
+    -> UserId           -- ^ Team owner
+    -> TeamId           -- ^ Team
+    -> ProviderId
+    -> ServiceId
+    -> Http ()
+whitelistService brig uid tid pid sid =
+    updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True) !!!
         const 200 === statusCode
 
 defNewService :: MonadIO m => Maybe Config -> m NewService
@@ -1594,6 +1605,9 @@ prepareBotUsersTeam brig galley sref = do
     let uid2 = userId u2
     h <- randomHandle
     putHandle brig uid1 h !!! const 200 === statusCode
+
+    -- Whitelist the bot
+    whitelistService brig uid1 tid pid sid
 
     -- Create conversation
     cid <- Team.createTeamConv galley tid uid1 [uid2] Nothing

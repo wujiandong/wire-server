@@ -274,12 +274,13 @@ deleteService :: MonadClient m
     -> Name
     -> RangedServiceTags
     -> m ()
-deleteService pid sid name tags =  retry x5 $ batch $ do
-    setConsistency Quorum
-    setType BatchUnLogged
-    addPrepQuery cql (pid, sid)
-    deleteServicePrefix sid name
-    deleteServiceTags pid sid name tags
+deleteService pid sid name tags = do
+    retry x5 $ batch $ do
+        setConsistency Quorum
+        setType BatchUnLogged
+        addPrepQuery cql (pid, sid)
+        deleteServicePrefix sid name
+        deleteServiceTags pid sid name tags
     deleteServiceWhitelist Nothing pid sid
   where
     cql :: PrepQuery W (ProviderId, ServiceId) ()
@@ -637,42 +638,51 @@ resolveRow (_, pid, sid) = lookupServiceProfile pid sid
 --------------------------------------------------------------------------------
 -- Service whitelist
 
-insertServiceWhitelist :: TeamId -> ProviderId -> ServiceId -> BatchM ()
-insertServiceWhitelist tid pid sid = addPrepQuery insertServiceWhitelistQ (tid, pid, sid)
-
-insertServiceWhitelistC :: MonadClient m => TeamId -> ProviderId -> ServiceId -> m ()
-insertServiceWhitelistC tid pid sid =
-    retry x5 $ write insertServiceWhitelistQ $ params Quorum (tid, pid, sid)
-
-insertServiceWhitelistQ :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
-insertServiceWhitelistQ =
-    "INSERT INTO service_whitelist \
-    \(team, provider, service) \
-    \VALUES (?, ?, ?)"
+insertServiceWhitelist :: MonadClient m => TeamId -> ProviderId -> ServiceId -> m ()
+insertServiceWhitelist tid pid sid =
+    retry x5 $ batch $ do
+        addPrepQuery insert1 (tid, pid, sid)
+        addPrepQuery insert1Rev (tid, pid, sid)
+  where
+    insert1 :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    insert1 = "INSERT INTO service_whitelist \
+              \(team, provider, service) \
+              \VALUES (?, ?, ?)"
+    insert1Rev :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    insert1Rev = "INSERT INTO service_whitelist_rev \
+                 \(team, provider, service) \
+                 \VALUES (?, ?, ?)"
 
 --
 
-deleteServiceWhitelist :: Maybe TeamId -> ProviderId -> ServiceId -> BatchM ()
-deleteServiceWhitelist Nothing pid sid =
-    addPrepQuery deleteServiceWhitelistEverywhereQ (pid, sid)
-deleteServiceWhitelist (Just tid) pid sid =
-    addPrepQuery deleteServiceWhitelistQ (tid, pid, sid)
-
-deleteServiceWhitelistC :: MonadClient m => Maybe TeamId -> ProviderId -> ServiceId -> m ()
-deleteServiceWhitelistC Nothing pid sid =
-    retry x5 $ write deleteServiceWhitelistEverywhereQ $ params Quorum (pid, sid)
-deleteServiceWhitelistC (Just tid) pid sid =
-    retry x5 $ write deleteServiceWhitelistQ $ params Quorum (tid, pid, sid)
-
-deleteServiceWhitelistQ :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
-deleteServiceWhitelistQ =
-    "DELETE FROM service_whitelist \
-    \WHERE team = ? AND provider = ? AND service = ?"
-
-deleteServiceWhitelistEverywhereQ :: PrepQuery W (ProviderId, ServiceId) ()
-deleteServiceWhitelistEverywhereQ =
-    "DELETE FROM service_whitelist \
-    \WHERE provider = ? AND service = ?"
+deleteServiceWhitelist :: MonadClient m => Maybe TeamId -> ProviderId -> ServiceId -> m ()
+deleteServiceWhitelist mbTid pid sid = case mbTid of
+    Nothing -> do
+        teams <- retry x5 $ query lookupRev $ params Quorum (pid, sid)
+        retry x5 $ batch $ do
+            setType BatchLogged
+            setConsistency Quorum
+            addPrepQuery deleteAllRev (pid, sid)
+            for_ teams $ \(Identity tid) -> addPrepQuery delete1 (tid, pid, sid)
+    Just tid ->
+        retry x5 $ batch $ do
+            setType BatchLogged
+            setConsistency Quorum
+            addPrepQuery delete1 (tid, pid, sid)
+            addPrepQuery delete1Rev (tid, pid, sid)
+  where
+    lookupRev :: PrepQuery R (ProviderId, ServiceId) (Identity TeamId)
+    lookupRev = "SELECT team FROM service_whitelist_rev \
+                \WHERE provider = ? AND service = ?"
+    delete1 :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    delete1 = "DELETE FROM service_whitelist \
+              \WHERE team = ? AND provider = ? AND service = ?"
+    delete1Rev :: PrepQuery W (TeamId, ProviderId, ServiceId) ()
+    delete1Rev = "DELETE FROM service_whitelist_rev \
+                 \WHERE team = ? AND provider = ? AND service = ?"
+    deleteAllRev :: PrepQuery W (ProviderId, ServiceId) ()
+    deleteAllRev = "DELETE FROM service_whitelist_rev \
+                   \WHERE provider = ? AND service = ?"
 
 --
 

@@ -262,13 +262,13 @@ putHandle brig usr h = put $ brig
   where
     payload = RequestBodyLBS . encode $ object [ "handle" .= h ]
 
-addClient :: ToJSON a => Brig -> User -> NewClient a -> Http ResponseLBS
-addClient brig usr new = post (addClientReq brig usr new)
+addClient :: ToJSON a => Brig -> UserId -> NewClient a -> Http ResponseLBS
+addClient brig uid new = post (addClientReq brig uid new)
 
-addClientReq :: ToJSON a => Brig -> User -> NewClient a -> (Request -> Request)
-addClientReq brig usr new = brig
+addClientReq :: ToJSON a => Brig -> UserId -> NewClient a -> (Request -> Request)
+addClientReq brig uid new = brig
     . path "/clients"
-    . zUser (userId usr)
+    . zUser uid
     . zConn "conn"
     . contentJson
     . body (RequestBodyLBS $ encode new)
