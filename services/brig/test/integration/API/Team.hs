@@ -16,7 +16,8 @@ import Brig.Types.User.Auth
 import Brig.Types.Intra
 import Control.Arrow ((&&&))
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async.Lifted.Safe (mapConcurrently_, replicateConcurrently)
+import Control.Concurrent.Async.Lifted.Safe.Extended
+    (mapConcurrently_, replicateConcurrently, forPooled, replicatePooled)
 import Control.Lens ((^.), view)
 import Control.Monad
 import Control.Monad.IO.Class
@@ -24,7 +25,6 @@ import Data.Aeson
 import Data.ByteString.Conversion
 import Data.ByteString.Lazy.Internal (ByteString)
 import Data.Id hiding (client)
-import Data.List.Extra (chunksOf)
 import Data.Maybe
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -133,7 +133,8 @@ testInvitationTooManyPending brig galley (TeamSizeLimit limit) = do
     (inviter, tid) <- createUserWithTeam brig galley
     emails <- replicateConcurrently (fromIntegral limit) randomEmail
     let invite e = InvitationRequest e (Name "Bob") Nothing
-    mapM_ (mapConcurrently_ $ postInvitation brig tid inviter . invite) (chunksOf 16 emails)
+    void $ forPooled 16 emails $ \email ->
+        postInvitation brig tid inviter (invite email)
     e <- randomEmail
     -- TODO: If this test takes longer to run than `team-invitation-timeout`, then some of the
     --       invitations have likely expired already and this test will actually _fail_
@@ -322,8 +323,8 @@ testInvitationMutuallyExclusive brig = do
 testInvitationTooManyMembers :: Brig -> Galley -> TeamSizeLimit -> Http ()
 testInvitationTooManyMembers brig galley (TeamSizeLimit limit) = do
     (creator, tid) <- createUserWithTeam brig galley
-    uids <- fmap toNewMember <$> replicateConcurrently (fromIntegral limit - 1) randomId
-    mapM_ (mapConcurrently_ (addTeamMember galley tid)) $ chunksOf 16 uids
+    void $ replicatePooled 16 (fromIntegral limit - 1) $
+        createTeamMember brig galley creator tid Team.fullPermissions
 
     em <- randomEmail
     let invite = InvitationRequest em (Name "Bob") Nothing
@@ -334,8 +335,6 @@ testInvitationTooManyMembers brig galley (TeamSizeLimit limit) = do
                . body (accept em inviteeCode)) !!! do
         const 403 === statusCode
         const (Just "too-many-team-members") === fmap Error.label . decodeBody
-  where
-    toNewMember u = Team.newNewTeamMember $ Team.newTeamMember u Team.fullPermissions
 
 testInvitationPaging :: Brig -> Galley -> Http ()
 testInvitationPaging brig galley = do

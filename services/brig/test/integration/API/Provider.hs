@@ -1588,15 +1588,12 @@ prepareBotUsersTeam brig galley sref = do
     let sid = sref^.serviceRefId
 
     -- Prepare users
-    u1 <- createUser "Ernie" "success@simulator.amazonses.com" brig
-    u2 <- createUser "Bert"  "success@simulator.amazonses.com" brig
-    let uid1 = userId u1
+    (uid1, tid) <- Team.createUserWithTeam brig galley
+    u1 <- selfUser <$> getSelfProfile brig uid1
+    u2 <- Team.createTeamMember brig galley uid1 tid Team.fullPermissions
     let uid2 = userId u2
     h <- randomHandle
     putHandle brig uid1 h !!! const 200 === statusCode
-
-    tid <- Team.createTeam uid1 galley
-    Team.addTeamMember galley tid $ Team.newNewTeamMember $ Team.newTeamMember uid2 Team.fullPermissions
 
     -- Create conversation
     cid <- Team.createTeamConv galley tid uid1 [uid2] Nothing

@@ -12,7 +12,6 @@ import Brig.Types.Team.Invitation
 import Brig.Types.Activation
 import Brig.Types.Connection
 import Control.Lens (view, (^?))
-import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson
 import Data.Aeson.Lens
@@ -58,13 +57,13 @@ createUserWithTeam brig galley = do
             , "password"        .= defPassword
             , "team"            .= newTeam
             ]
-    bdy <- decodeBody <$> post (brig . path "/i/users" . contentJson . body p)
-    let (Just uid, Just (Just tid)) = (userId <$> bdy, userTeam <$> bdy)
-    (team:_) <- view Team.teamListTeams <$> getTeams uid galley
+    Just user <- decodeBody <$> post (brig . path "/i/users" . contentJson . body p)
+    let Just tid = userTeam user
+    (team:_) <- view Team.teamListTeams <$> getTeams (userId user) galley
     liftIO $ assertBool "Team ID in registration and team table do not match" (tid == view Team.teamId team)
-    selfTeam <- userTeam . selfUser <$> getSelfProfile brig uid
+    selfTeam <- userTeam . selfUser <$> getSelfProfile brig (userId user)
     liftIO $ assertBool "Team ID in self profile and team table do not match" (selfTeam == Just tid)
-    return (uid, tid)
+    return (userId user, tid)
 
 -- | Create a team member with given permissions.
 createTeamMember
@@ -78,20 +77,6 @@ createTeamMember brig galley owner tid perm = do
     user <- inviteAndRegisterUser owner tid brig
     updatePermissions owner tid (userId user, perm) galley
     return user
-
--- | NB: this function doesn't update user's team info in Brig.
---
--- If you want to create a new user who will be truly a member of given team
--- (with Brig and Galley agreeing upon that), use 'createTeamMember'. Most
--- of the time you will indeed want to use that.
-addTeamMember :: Galley -> TeamId -> Team.NewTeamMember -> Http ()
-addTeamMember galley tid mem =
-    void $ post ( galley
-                . paths ["i", "teams", toByteString' tid, "members"]
-                . contentJson
-                . expect2xx
-                . lbytes (encode mem)
-                )
 
 inviteAndRegisterUser :: UserId -> TeamId -> Brig -> Http User
 inviteAndRegisterUser u tid brig = do
