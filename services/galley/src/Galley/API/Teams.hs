@@ -261,7 +261,7 @@ uncheckedAddTeamMember (tid ::: req ::: _) = do
 
 updateTeamMember :: UserId ::: ConnId ::: TeamId ::: Request ::: JSON ::: JSON
                  -> Galley Response
-updateTeamMember (zusr::: zcon ::: tid ::: req ::: _) = do
+updateTeamMember (zusr ::: zcon ::: tid ::: req ::: _) = do
     -- the team member to be updated
     targetMember <- view ntmNewTeamMember <$> fromBody req invalidPayload
     let targetId          = targetMember^.userId

@@ -629,7 +629,7 @@ testServiceWhitelistSearchPermissions _config _db brig galley = do
 testServiceWhitelistUpdatePermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testServiceWhitelistUpdatePermissions config db brig galley = do
     -- Create a team
-    (_, tid) <- Team.createUserWithTeam brig galley
+    (owner, tid) <- Team.createUserWithTeam brig galley
     -- Create a service
     pid <- providerId <$> randomProvider db brig
     new <- defNewService config
@@ -641,9 +641,7 @@ testServiceWhitelistUpdatePermissions config db brig galley = do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
     -- Check that a member who's not a team owner also can't add it to the whitelist
-    _uid <- userId <$> randomUser brig
-    Team.addTeamMember galley tid $
-        Team.newNewTeamMember $ Team.newTeamMember _uid Team.noPermissions
+    _uid <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
     updateServiceWhitelist brig _uid tid (UpdateServiceWhitelist pid sid True) !!! do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
@@ -652,9 +650,7 @@ testSearchServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -
 testSearchServiceWhitelist config db brig galley = do
     -- Create a team, a team owner, and a team member with no permissions
     (owner, tid) <- Team.createUserWithTeam brig galley
-    uid <- userId <$> randomUser brig
-    Team.addTeamMember galley tid $
-        Team.newNewTeamMember $ Team.newTeamMember uid Team.noPermissions
+    uid <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
 
     -- Create services and add them all to the whitelist
     pid  <- providerId <$> randomProvider db brig
@@ -692,7 +688,7 @@ testSearchServiceWhitelist config db brig galley = do
         uniq2 <- UUID.toText . toUUID <$> randomId
         svc2 <- addGetService brig pid (mkNew new (Name (uniq2 <> "|Extra"), [PollTag]))
         enableService brig pid (serviceId svc2)
-        whitelist uid tid pid (serviceId svc2)
+        whitelist owner tid pid (serviceId svc2)
         page <- search Nothing
         liftIO $ assertEqual "page length" 20 (length (serviceProfilePageResults page))
         liftIO $ assertEqual "has more" True (serviceProfilePageHasMore page)

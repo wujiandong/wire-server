@@ -17,11 +17,10 @@ import Brig.Types.Intra
 import Control.Arrow ((&&&))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async.Lifted.Safe (mapConcurrently_, replicateConcurrently)
-import Control.Lens ((^.), (^?), view)
+import Control.Lens ((^.), view)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson
-import Data.Aeson.Lens
 import Data.ByteString.Conversion
 import Data.ByteString.Lazy.Internal (ByteString)
 import Data.Id hiding (client)
@@ -30,7 +29,6 @@ import Data.Maybe
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Word (Word16)
-import GHC.Stack (HasCallStack)
 import Network.HTTP.Client             (Manager)
 import Test.Tasty hiding (Timeout)
 import Test.Tasty.HUnit
@@ -42,7 +40,6 @@ import Util.Options.Common
 import qualified Brig.AWS                    as AWS
 import qualified Brig.Options                as Opt
 import qualified Data.Text.Ascii             as Ascii
-import qualified Data.Text.Encoding          as T
 import qualified Data.UUID.V4                as UUID
 import qualified Network.Wai.Utilities.Error as Error
 import qualified Galley.Types.Teams          as Team
@@ -629,128 +626,3 @@ testDeleteUserSSO brig galley = do
     -- if the mock sso service disagrees with the deletion: 403 "sso-not-allowed" or something
     -- if user is last remaining owner: 403 "no-other-owner" (as above).
     -- otherwise: 2xx.
-
--------------------------------------------------------------------------------
--- Utilities
-
-listConnections :: HasCallStack => UserId -> Brig -> Http UserConnectionList
-listConnections u brig = do
-    r <- get $ brig
-             . path "connections"
-             . zUser u
-    return $ fromMaybe (error "listConnections: failed to parse response") (decodeBody r)
-
-getInvitation :: Brig -> InvitationCode -> Http (Maybe Invitation)
-getInvitation brig c = do
-    r <- get $ brig
-             . path "/teams/invitations/info"
-             . queryItem "code" (toByteString' c)
-    return . decode . fromMaybe "" $ responseBody r
-
-postInvitation :: Brig -> TeamId -> UserId -> InvitationRequest -> Http ResponseLBS
-postInvitation brig t u i = post $ brig
-    . paths ["teams", toByteString' t, "invitations"]
-    . contentJson
-    . body (RequestBodyLBS $ encode i)
-    . zAuthAccess u "conn"
-
-suspendTeam :: Brig -> TeamId -> HttpT IO (Response (Maybe ByteString))
-suspendTeam brig t = post $ brig
-    . paths ["i", "teams", toByteString' t, "suspend"]
-    . contentJson
-
-unsuspendTeam :: Brig -> TeamId -> Http ResponseLBS
-unsuspendTeam brig t = post $ brig
-    . paths ["i", "teams", toByteString' t, "unsuspend"]
-    . contentJson
-
-getTeam :: HasCallStack => Galley -> TeamId -> Http Team.TeamData
-getTeam galley t = do
-    r <- get $ galley . paths ["i", "teams", toByteString' t]
-    return $ fromMaybe (error "getTeam: failed to parse response") (decodeBody r)
-
-getInvitationCode :: HasCallStack => Brig -> TeamId -> InvitationId -> Http (Maybe InvitationCode)
-getInvitationCode brig t ref = do
-    r <- get ( brig
-             . path "/i/teams/invitation-code"
-             . queryItem "team" (toByteString' t)
-             . queryItem "invitation_id" (toByteString' ref)
-             )
-    let lbs   = fromMaybe "" $ responseBody r
-    return $ fromByteString . fromMaybe (error "No code?") $ T.encodeUtf8 <$> (lbs ^? key "code"  . _String)
-
-assertNoInvitationCode :: HasCallStack => Brig -> TeamId -> InvitationId -> Http ()
-assertNoInvitationCode brig t i =
-    get ( brig
-        . path "/i/teams/invitation-code"
-        . queryItem "team" (toByteString' t)
-        . queryItem "invitation_id" (toByteString' i)
-        ) !!! do
-          const 400 === statusCode
-          const (Just "invalid-invitation-code") === fmap Error.label . decodeBody
-
-accept :: Email -> InvitationCode -> RequestBody
-accept email code = RequestBodyLBS . encode $ object
-    [ "name"      .= ("Bob" :: Text)
-    , "email"     .= fromEmail email
-    , "password"  .= defPassword
-    , "team_code" .= code
-    ]
-
-register :: Email -> Team.BindingNewTeam -> Brig -> HttpT IO (Response (Maybe ByteString))
-register e t brig = post (brig . path "/register" . contentJson . body (
-    RequestBodyLBS . encode  $ object
-        [ "name"            .= ("Bob" :: Text)
-        , "email"           .= fromEmail e
-        , "password"        .= defPassword
-        , "team"            .= t
-        ]
-    ))
-
-register' :: Email -> Team.BindingNewTeam -> ActivationCode -> Brig -> HttpT IO (Response (Maybe ByteString))
-register' e t c brig = post (brig . path "/register" . contentJson . body (
-    RequestBodyLBS . encode  $ object
-        [ "name"            .= ("Bob" :: Text)
-        , "email"           .= fromEmail e
-        , "email_code"      .= c
-        , "password"        .= defPassword
-        , "team"            .= t
-        ]
-    ))
-
-decodeBody' :: FromJSON a => Response (Maybe ByteString) -> Http a
-decodeBody' x = maybe (error $ "Failed to decodeBody: " ++ show x) return $ decodeBody x
-
-inviteAndRegisterUser :: UserId -> TeamId -> Brig -> HttpT IO User
-inviteAndRegisterUser u tid brig = do
-    inviteeEmail <- randomEmail
-    let invite = InvitationRequest inviteeEmail (Name "Bob") Nothing
-    Just inv <- decodeBody <$> postInvitation brig tid u invite
-    Just inviteeCode <- getInvitationCode brig tid (inInvitation inv)
-    rspInvitee <- post (brig . path "/register"
-                             . contentJson
-                             . body (accept inviteeEmail inviteeCode)) <!! const 201 === statusCode
-
-    let Just invitee = decodeBody rspInvitee
-    liftIO $ assertBool "Team ID in registration and team table do not match" (Just tid == userTeam invitee)
-    selfTeam <- userTeam . selfUser <$> getSelfProfile brig (userId invitee)
-    liftIO $ assertBool "Team ID in self profile and team table do not match" (selfTeam == Just tid)
-    return invitee
-
-updatePermissions :: UserId -> TeamId -> (UserId, Team.Permissions) -> Galley -> HttpT IO ()
-updatePermissions from tid (to, perm) galley =
-    put ( galley
-        . paths ["teams", toByteString' tid, "members"]
-        . zUser from
-        . zConn "conn"
-        . Bilge.json changeMember
-        ) !!! const 200 === statusCode
-  where
-    changeMember = Team.newNewTeamMember $ Team.newTeamMember to perm
-
-isActivatedUser :: UserId -> Brig -> Http Bool
-isActivatedUser uid brig = do
-    resp <- get (brig . path "/i/users" . queryItem "ids" (toByteString' uid) . expect2xx)
-    pure $ case decodeBody @[User] resp of
-        Just (_:_) -> True
-        _ -> False

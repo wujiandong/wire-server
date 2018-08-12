@@ -1,20 +1,27 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE TypeApplications  #-}
 
 module API.Team.Util where
 
 import Bilge hiding (accept, timeout, head)
 import Bilge.Assert
 import Brig.Types.User
-import Control.Lens (view)
+import Brig.Types.Team.Invitation
+import Brig.Types.Activation
+import Brig.Types.Connection
+import Control.Lens (view, (^?))
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson
+import Data.Aeson.Lens
 import Data.ByteString.Conversion
 import Data.Id hiding (client)
 import Data.Maybe (fromMaybe)
 import Data.Misc (Milliseconds)
+import Data.Text (Text)
+import Data.ByteString.Lazy (ByteString)
 import Data.Range
 import Galley.Types (ConvTeamInfo (..), NewConv (..), NewConvUnmanaged (..), NewConvManaged (..))
 import GHC.Stack (HasCallStack)
@@ -23,6 +30,9 @@ import Util
 
 import qualified Data.Set                    as Set
 import qualified Galley.Types.Teams          as Team
+import qualified Galley.Types.Teams.Intra    as Team
+import qualified Data.Text.Encoding          as T
+import qualified Network.Wai.Utilities.Error as Error
 
 createTeam :: UserId -> Galley -> Http TeamId
 createTeam u galley = do
@@ -56,6 +66,24 @@ createUserWithTeam brig galley = do
     liftIO $ assertBool "Team ID in self profile and team table do not match" (selfTeam == Just tid)
     return (uid, tid)
 
+-- | Create a team member with given permissions.
+createTeamMember
+    :: Brig
+    -> Galley
+    -> UserId            -- ^ Team owner
+    -> TeamId            -- ^ Team where the new user will be created
+    -> Team.Permissions  -- ^ Permissions that the new user will have
+    -> Http User
+createTeamMember brig galley owner tid perm = do
+    user <- inviteAndRegisterUser owner tid brig
+    updatePermissions owner tid (userId user, perm) galley
+    return user
+
+-- | NB: this function doesn't update user's team info in Brig.
+--
+-- If you want to create a new user who will be truly a member of given team
+-- (with Brig and Galley agreeing upon that), use 'createTeamMember'. Most
+-- of the time you will indeed want to use that.
 addTeamMember :: Galley -> TeamId -> Team.NewTeamMember -> Http ()
 addTeamMember galley tid mem =
     void $ post ( galley
@@ -64,6 +92,33 @@ addTeamMember galley tid mem =
                 . expect2xx
                 . lbytes (encode mem)
                 )
+
+inviteAndRegisterUser :: UserId -> TeamId -> Brig -> Http User
+inviteAndRegisterUser u tid brig = do
+    inviteeEmail <- randomEmail
+    let invite = InvitationRequest inviteeEmail (Name "Bob") Nothing
+    Just inv <- decodeBody <$> postInvitation brig tid u invite
+    Just inviteeCode <- getInvitationCode brig tid (inInvitation inv)
+    rspInvitee <- post (brig . path "/register"
+                             . contentJson
+                             . body (accept inviteeEmail inviteeCode)) <!! const 201 === statusCode
+
+    let Just invitee = decodeBody rspInvitee
+    liftIO $ assertBool "Team ID in registration and team table do not match" (Just tid == userTeam invitee)
+    selfTeam <- userTeam . selfUser <$> getSelfProfile brig (userId invitee)
+    liftIO $ assertBool "Team ID in self profile and team table do not match" (selfTeam == Just tid)
+    return invitee
+
+updatePermissions :: UserId -> TeamId -> (UserId, Team.Permissions) -> Galley -> Http ()
+updatePermissions from tid (to, perm) galley =
+    put ( galley
+        . paths ["teams", toByteString' tid, "members"]
+        . zUser from
+        . zConn "conn"
+        . Bilge.json changeMember
+        ) !!! const 200 === statusCode
+  where
+    changeMember = Team.newNewTeamMember $ Team.newTeamMember to perm
 
 createTeamConv :: HasCallStack => Galley -> TeamId -> UserId -> [UserId] -> Maybe Milliseconds -> Http ConvId
 createTeamConv g tid u us mtimer = do
@@ -124,3 +179,98 @@ getTeams u galley = do
 
 newTeam :: Team.BindingNewTeam
 newTeam = Team.BindingNewTeam $ Team.newNewTeam (unsafeRange "teamName") (unsafeRange "defaultIcon")
+
+accept :: Email -> InvitationCode -> RequestBody
+accept email code = RequestBodyLBS . encode $ object
+    [ "name"      .= ("Bob" :: Text)
+    , "email"     .= fromEmail email
+    , "password"  .= defPassword
+    , "team_code" .= code
+    ]
+
+register :: Email -> Team.BindingNewTeam -> Brig -> Http (Response (Maybe ByteString))
+register e t brig = post (brig . path "/register" . contentJson . body (
+    RequestBodyLBS . encode  $ object
+        [ "name"            .= ("Bob" :: Text)
+        , "email"           .= fromEmail e
+        , "password"        .= defPassword
+        , "team"            .= t
+        ]
+    ))
+
+register' :: Email -> Team.BindingNewTeam -> ActivationCode -> Brig -> Http (Response (Maybe ByteString))
+register' e t c brig = post (brig . path "/register" . contentJson . body (
+    RequestBodyLBS . encode  $ object
+        [ "name"            .= ("Bob" :: Text)
+        , "email"           .= fromEmail e
+        , "email_code"      .= c
+        , "password"        .= defPassword
+        , "team"            .= t
+        ]
+    ))
+
+listConnections :: HasCallStack => UserId -> Brig -> Http UserConnectionList
+listConnections u brig = do
+    r <- get $ brig
+             . path "connections"
+             . zUser u
+    return $ fromMaybe (error "listConnections: failed to parse response") (decodeBody r)
+
+getInvitation :: Brig -> InvitationCode -> Http (Maybe Invitation)
+getInvitation brig c = do
+    r <- get $ brig
+             . path "/teams/invitations/info"
+             . queryItem "code" (toByteString' c)
+    return . decode . fromMaybe "" $ responseBody r
+
+postInvitation :: Brig -> TeamId -> UserId -> InvitationRequest -> Http ResponseLBS
+postInvitation brig t u i = post $ brig
+    . paths ["teams", toByteString' t, "invitations"]
+    . contentJson
+    . body (RequestBodyLBS $ encode i)
+    . zAuthAccess u "conn"
+
+suspendTeam :: Brig -> TeamId -> Http (Response (Maybe ByteString))
+suspendTeam brig t = post $ brig
+    . paths ["i", "teams", toByteString' t, "suspend"]
+    . contentJson
+
+unsuspendTeam :: Brig -> TeamId -> Http ResponseLBS
+unsuspendTeam brig t = post $ brig
+    . paths ["i", "teams", toByteString' t, "unsuspend"]
+    . contentJson
+
+getTeam :: HasCallStack => Galley -> TeamId -> Http Team.TeamData
+getTeam galley t = do
+    r <- get $ galley . paths ["i", "teams", toByteString' t]
+    return $ fromMaybe (error "getTeam: failed to parse response") (decodeBody r)
+
+getInvitationCode :: HasCallStack => Brig -> TeamId -> InvitationId -> Http (Maybe InvitationCode)
+getInvitationCode brig t ref = do
+    r <- get ( brig
+             . path "/i/teams/invitation-code"
+             . queryItem "team" (toByteString' t)
+             . queryItem "invitation_id" (toByteString' ref)
+             )
+    let lbs   = fromMaybe "" $ responseBody r
+    return $ fromByteString . fromMaybe (error "No code?") $ T.encodeUtf8 <$> (lbs ^? key "code"  . _String)
+
+assertNoInvitationCode :: HasCallStack => Brig -> TeamId -> InvitationId -> Http ()
+assertNoInvitationCode brig t i =
+    get ( brig
+        . path "/i/teams/invitation-code"
+        . queryItem "team" (toByteString' t)
+        . queryItem "invitation_id" (toByteString' i)
+        ) !!! do
+          const 400 === statusCode
+          const (Just "invalid-invitation-code") === fmap Error.label . decodeBody
+
+decodeBody' :: FromJSON a => Response (Maybe ByteString) -> Http a
+decodeBody' x = maybe (error $ "Failed to decodeBody: " ++ show x) return $ decodeBody x
+
+isActivatedUser :: UserId -> Brig -> Http Bool
+isActivatedUser uid brig = do
+    resp <- get (brig . path "/i/users" . queryItem "ids" (toByteString' uid) . expect2xx)
+    pure $ case decodeBody @[User] resp of
+        Just (_:_) -> True
+        _ -> False
