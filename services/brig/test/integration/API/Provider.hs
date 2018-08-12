@@ -463,9 +463,9 @@ testListServices config db brig = do
     -- # Bjø -> Bjørn
     _found <- map serviceProfileName <$> searchAndCheck (mkName "Bjø")
     liftIO $ assertEqual "Bjø" [mkName "Bjørn"] _found
-    -- # Bj -> Bjorn, Bjørn
+    -- # Bj -> bjorn, Bjørn
     _found <- map serviceProfileName <$> searchAndCheck (mkName "Bj")
-    liftIO $ assertEqual "Bj" [mkName "Bjorn", mkName "Bjørn"] _found
+    liftIO $ assertEqual "Bj" [mkName "bjorn", mkName "Bjørn"] _found
     -- # chris -> CHRISTMAS
     _found <- map serviceProfileName <$> searchAndCheck (mkName "chris")
     liftIO $ assertEqual "chris" [mkName "CHRISTMAS"] _found
@@ -477,7 +477,7 @@ testListServices config db brig = do
     mkNew new (n, t) = new { newServiceName = n
                            , newServiceTags = unsafeRange (Set.fromList t)
                            }
-    select (Name prefix) nm = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd) nm
+    select (Name prefix) = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd)
 
 testDeleteService :: Maybe Config -> DB.ClientState -> Brig -> Http ()
 testDeleteService config db brig = do
@@ -636,6 +636,7 @@ testSearchServiceWhitelist config db brig galley = do
         let sid = serviceId svc
         enableService brig pid sid
         whitelist uid tid pid sid
+    let mkName n = Name (uniq <> "|" <> n)
 
     let services :: [(ServiceId, Name)]
         services = map (serviceId &&& serviceName) svcs
@@ -671,10 +672,37 @@ testSearchServiceWhitelist config db brig galley = do
         page <- search Nothing
         liftIO $ assertEqual "page length" 20 (length (serviceProfilePageResults page))
         liftIO $ assertEqual "has more" True (serviceProfilePageHasMore page)
+
+    -- This function searches for a prefix and check that the results match
+    -- our known list of services
+    let searchAndCheck (Name name) = do
+            result <- search (Just name)
+            assertServiceDetails ("name " <> show name) (select name services) result
+            return (serviceProfilePageResults result)
+
+    -- Search by exact name and check that only one service is found
+    forM_ services $ \(sid, Name name) ->
+        search (Just name) >>= assertServiceDetails ("name " <> show name) [(sid, Name name)]
+
+    -- Some chosen prefixes
+    -- # Bjø -> Bjørn
+    _found <- map serviceProfileName <$> searchAndCheck (mkName "Bjø")
+    liftIO $ assertEqual "Bjø" [mkName "Bjørn"] _found
+    -- # Bj -> bjorn, Bjørn
+    _found <- map serviceProfileName <$> searchAndCheck (mkName "Bj")
+    liftIO $ assertEqual "Bj" [mkName "bjorn", mkName "Bjørn"] _found
+    -- # chris -> CHRISTMAS
+    _found <- map serviceProfileName <$> searchAndCheck (mkName "chris")
+    liftIO $ assertEqual "chris" [mkName "CHRISTMAS"] _found
+
+    -- Ensure name changes are also indexed properly
+    forM_ services $ \(sid, _) ->
+        searchAndAssertNameChange brig pid sid uid uniq (search . Just . fromName)
   where
     mkNew new (n, t) = new { newServiceName = n
                            , newServiceTags = unsafeRange (Set.fromList t)
                            }
+    select prefix = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd)
     whitelist uid tid pid sid =
         updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True)
             !!! const 200 === statusCode
@@ -1359,7 +1387,7 @@ taggedServiceNames :: Text -> [(Name, [ServiceTag])]
 taggedServiceNames prefix =
     [ (mkName "Alpha",     [SocialTag, QuizTag, BusinessTag])
     , (mkName "Beta",      [SocialTag, MusicTag, LifestyleTag])
-    , (mkName "Bjorn",     [SocialTag, QuizTag, TravelTag])
+    , (mkName "bjorn",     [SocialTag, QuizTag, TravelTag])
     , (mkName "Bjørn",     [SocialTag, MusicTag, LifestyleTag])
     , (mkName "CHRISTMAS", [SocialTag, QuizTag, WeatherTag])
     , (mkName "Delta",     [SocialTag, MusicTag, LifestyleTag])
@@ -1578,7 +1606,8 @@ addBotConv brig cannon uid1 uid2 cid pid sid buf =
         return (rsAddBotId rs)
 
 ----------------------------------------------------------------------------
--- Service search utilities
+-- Service search utilities (abstracted out because we have more than one
+-- service search endpoint)
 
 -- | Given some endpoint that can search for services by name prefix, check
 -- that it doesn't break when service name changes.

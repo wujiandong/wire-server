@@ -708,7 +708,7 @@ paginateServiceWhitelist tid mbPrefix filterDisabled size = liftClient $ do
     maybeFilterPrefix
         | Just prefix <- mbPrefix =
               let prefix' = toLower (fromRange prefix)
-              in  takeWhile ((prefix' `isPrefixOf`) . toLower . fromName . serviceProfileName)
+              in  filter ((prefix' `isPrefixOf`) . toLower . fromName . serviceProfileName)
         | otherwise = id
 
 getServiceWhitelistStatus
