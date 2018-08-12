@@ -216,7 +216,7 @@ getTeamMembers (zusr::: tid ::: _) = do
             pure (json $ teamMemberListJson withPerm (newTeamMemberList mems))
 
 getTeamMember :: UserId ::: TeamId ::: UserId ::: JSON -> Galley Response
-getTeamMember (zusr::: tid ::: uid ::: _) = do
+getTeamMember (zusr ::: tid ::: uid ::: _) = do
     mems <- Data.teamMembers tid
     case findTeamMember zusr mems of
         Nothing -> throwM noTeamMember
@@ -236,7 +236,7 @@ uncheckedGetTeamMembers (tid ::: _) = do
     return . json $ teamMemberListJson True (newTeamMemberList mems)
 
 addTeamMember :: UserId ::: ConnId ::: TeamId ::: Request ::: JSON ::: JSON -> Galley Response
-addTeamMember (zusr::: zcon ::: tid ::: req ::: _) = do
+addTeamMember (zusr ::: zcon ::: tid ::: req ::: _) = do
     nmem <- fromBody req invalidPayload
     mems <- Data.teamMembers tid
 

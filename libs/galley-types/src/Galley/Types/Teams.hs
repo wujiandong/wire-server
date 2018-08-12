@@ -50,6 +50,7 @@ module Galley.Types.Teams
     , Permissions
     , newPermissions
     , fullPermissions
+    , noPermissions
     , hasPermission
     , hasFullPermissions
     , self
@@ -293,6 +294,9 @@ newPermissions a b
 
 fullPermissions :: Permissions
 fullPermissions = let p = intToPerms maxBound in Permissions p p
+
+noPermissions :: Permissions
+noPermissions = Permissions mempty mempty
 
 hasPermission :: TeamMember -> Perm -> Bool
 hasPermission tm p = p `Set.member` (tm^.permissions.self)

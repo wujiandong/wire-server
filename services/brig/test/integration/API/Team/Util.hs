@@ -37,6 +37,7 @@ createTeam u galley = do
     maybe (error "invalid team id") return $
         fromByteString $ getHeader' "Location" r
 
+-- | NB: the created user is the team owner.
 createUserWithTeam :: Brig -> Galley -> Http (UserId, TeamId)
 createUserWithTeam brig galley = do
     e <- randomEmail

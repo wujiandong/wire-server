@@ -108,6 +108,8 @@ tests conf p db b c g = do
         , testGroup "service whitelist"
             [ test p "non-team-member can't search" $
                                       testServiceWhitelistSearchPermissions conf db b g
+            , test p "non-team-owner can't update" $
+                                      testServiceWhitelistUpdatePermissions conf db b g
             , test p "search works" $ testSearchServiceWhitelist conf db b g
             ]
         , testGroup "bot"
@@ -434,7 +436,7 @@ testListServices config db brig = do
     -- This is how we're going to call our /services/search endpoint. Every
     -- time we would call it twice (with tags and without) and assert that
     -- results match.
-    let search :: Name -> Http ServiceProfilePage
+    let search :: HasCallStack => Name -> Http ServiceProfilePage
         search name = do
             r1 <- searchServices brig 20 uid (Just name) Nothing
             r2 <- searchServices brig 20 uid (Just name) (Just (match1 SocialTag))
@@ -447,7 +449,8 @@ testListServices config db brig = do
             return r1
     -- This function searches for a prefix and check that the results match
     -- our known list of services
-    let searchAndCheck name = do
+    let searchAndCheck :: HasCallStack => Name -> Http [ServiceProfile]
+        searchAndCheck name = do
             result <- search name
             assertServiceDetails ("name " <> show name) (select name services) result
             return (serviceProfilePageResults result)
@@ -623,21 +626,45 @@ testServiceWhitelistSearchPermissions _config _db brig galley = do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
 
+testServiceWhitelistUpdatePermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
+testServiceWhitelistUpdatePermissions config db brig galley = do
+    -- Create a team
+    (_, tid) <- Team.createUserWithTeam brig galley
+    -- Create a service
+    pid <- providerId <$> randomProvider db brig
+    new <- defNewService config
+    sid <- serviceId <$> addGetService brig pid new
+    enableService brig pid sid
+    -- Check that a random user can't add it to the whitelist
+    _uid <- userId <$> randomUser brig
+    updateServiceWhitelist brig _uid tid (UpdateServiceWhitelist pid sid True) !!! do
+        const 403 === statusCode
+        const (Just "insufficient-permissions") === fmap Error.label . decodeBody
+    -- Check that a member who's not a team owner also can't add it to the whitelist
+    _uid <- userId <$> randomUser brig
+    Team.addTeamMember galley tid $
+        Team.newNewTeamMember $ Team.newTeamMember _uid Team.noPermissions
+    updateServiceWhitelist brig _uid tid (UpdateServiceWhitelist pid sid True) !!! do
+        const 403 === statusCode
+        const (Just "insufficient-permissions") === fmap Error.label . decodeBody
+
 testSearchServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testSearchServiceWhitelist config db brig galley = do
-    -- Create a team and a user who's on that team
-    (uid, tid) <- Team.createUserWithTeam brig galley
+    -- Create a team, a team owner, and a team member with no permissions
+    (owner, tid) <- Team.createUserWithTeam brig galley
+    uid <- userId <$> randomUser brig
+    Team.addTeamMember galley tid $
+        Team.newNewTeamMember $ Team.newTeamMember uid Team.noPermissions
 
     -- Create services and add them all to the whitelist
-    prv <- randomProvider db brig
-    let pid = providerId prv
+    pid  <- providerId <$> randomProvider db brig
     uniq <- UUID.toText . toUUID <$> randomId
     new  <- defNewService config
     svcs <- mapM (addGetService brig pid . mkNew new) (taggedServiceNames uniq)
     forM_ svcs $ \svc -> do
         let sid = serviceId svc
         enableService brig pid sid
-        whitelist uid tid pid sid
+        whitelist owner tid pid sid
     let mkName n = Name (uniq <> "|" <> n)
 
     let services :: [(ServiceId, Name)]
@@ -647,7 +674,7 @@ testSearchServiceWhitelist config db brig galley = do
     -- endpoint. Every time we call it twice (with filter_disabled=false and
     -- without) and assert that results match – which should always be the
     -- case since in this test we won't have any disabled services.
-    let search :: Maybe Text -> Http ServiceProfilePage
+    let search :: HasCallStack => Maybe Text -> Http ServiceProfilePage
         search mbName = do
             r1 <- searchServiceWhitelist    brig 20 uid tid mbName
             r2 <- searchServiceWhitelistAll brig 20 uid tid mbName
@@ -672,7 +699,8 @@ testSearchServiceWhitelist config db brig galley = do
 
     -- This function searches for a prefix and check that the results match
     -- our known list of services
-    let searchAndCheck (Name name) = do
+    let searchAndCheck :: HasCallStack => Name -> Http [ServiceProfile]
+        searchAndCheck (Name name) = do
             result <- search (Just name)
             assertServiceDetails ("name " <> show name) (select name services) result
             return (serviceProfilePageResults result)
@@ -1380,6 +1408,9 @@ mkMessage fromc rcps = object
     text = fromJust . fromByteString . toByteString'
 
 -- | A list of 20 services, all having names that begin with the given prefix.
+--
+-- NB: in some of the tests above, we depend on the fact that there are
+-- exactly 20 services here.
 taggedServiceNames :: Text -> [(Name, [ServiceTag])]
 taggedServiceNames prefix =
     [ (mkName "Alpha",     [SocialTag, QuizTag, BusinessTag])
@@ -1609,7 +1640,8 @@ addBotConv brig cannon uid1 uid2 cid pid sid buf =
 -- | Given some endpoint that can search for services by name prefix, check
 -- that it doesn't break when service name changes.
 searchAndAssertNameChange
-    :: Brig
+    :: HasCallStack
+    => Brig
     -> ProviderId    -- ^ Service provider
     -> ServiceId     -- ^ Service which will have its name changed
     -> UserId        -- ^ User who will perform the change
@@ -1648,7 +1680,7 @@ searchAndAssertNameChange brig pid sid uid uniq search = do
 
 -- | Check that lists match and there are no results on the second page.
 assertServiceDetails
-    :: MonadIO m
+    :: (HasCallStack, MonadIO m)
     => String -> [(ServiceId, Name)] -> ServiceProfilePage -> m ()
 assertServiceDetails testName expected page = liftIO $ do
     let ids   = map serviceProfileId   (serviceProfilePageResults page)
@@ -1663,7 +1695,8 @@ assertServiceDetails testName expected page = liftIO $ do
 
 -- | Call the endpoint that searches through all services.
 searchServices
-    :: Brig -> Int -> UserId -> Maybe Name -> Maybe MatchAny -> Http ServiceProfilePage
+    :: HasCallStack
+    => Brig -> Int -> UserId -> Maybe Name -> Maybe MatchAny -> Http ServiceProfilePage
 searchServices brig size uid mbStart mbTags = case (mbStart, mbTags) of
     (Nothing, Nothing) ->
         error "searchServices: query not supported"
@@ -1678,7 +1711,8 @@ searchServices brig size uid mbStart mbTags = case (mbStart, mbTags) of
 
 -- | Call the endpoint that searches through whitelisted services.
 searchServiceWhitelist
-    :: Brig -> Int -> UserId -> TeamId -> Maybe Text -> Http ServiceProfilePage
+    :: HasCallStack
+    => Brig -> Int -> UserId -> TeamId -> Maybe Text -> Http ServiceProfilePage
 searchServiceWhitelist brig size uid tid mbStart =
     fromMaybe (error "searchServiceWhitelist") . decodeBody <$>
         (listTeamServiceProfilesByPrefix brig uid tid mbStart True size
@@ -1687,7 +1721,8 @@ searchServiceWhitelist brig size uid tid mbStart =
 -- | Call the endpoint that searches through whitelisted services, and don't
 -- filter out disabled services.
 searchServiceWhitelistAll
-    :: Brig -> Int -> UserId -> TeamId -> Maybe Text -> Http ServiceProfilePage
+    :: HasCallStack
+    => Brig -> Int -> UserId -> TeamId -> Maybe Text -> Http ServiceProfilePage
 searchServiceWhitelistAll brig size uid tid mbStart =
     fromMaybe (error "searchServiceWhitelistAll") . decodeBody <$>
         (listTeamServiceProfilesByPrefix brig uid tid mbStart False size
