@@ -512,12 +512,12 @@ parseEventData ConvDelete (Just j) = do
     let f o = Just . EdConvDelete  <$> o .: "conv"
     withObject "conversation delete data" f j
 
-parseEventData ServiceWhitelistAdd Nothing  = fail "missing event data for type 'team.service-whitelist-add"
+parseEventData ServiceWhitelistAdd Nothing  = fail "missing event data for type 'team.service-whitelist-add'"
 parseEventData ServiceWhitelistAdd (Just j) = do
     let f o = fmap Just . EdServiceWhitelistAdd <$> o .: "provider" <*> o .: "service"
     withObject "service whitelist add" f j
 
-parseEventData ServiceWhitelistRemove Nothing  = fail "missing event data for type 'team.service-whitelist-remove"
+parseEventData ServiceWhitelistRemove Nothing  = fail "missing event data for type 'team.service-whitelist-remove'"
 parseEventData ServiceWhitelistRemove (Just j) = do
     let f o = fmap Just . EdServiceWhitelistRemove <$> o .: "provider" <*> o .: "service"
     withObject "service whitelist remove" f j
