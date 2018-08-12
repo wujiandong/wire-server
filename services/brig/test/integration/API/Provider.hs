@@ -106,11 +106,12 @@ tests conf p db b c g = do
             , test p "delete"                 $ testDeleteService conf db b
             ]
         , testGroup "service whitelist"
-            [ test p "non-team-member can't search" $
-                                      testServiceWhitelistSearchPermissions conf db b g
-            , test p "non-team-owner can't update" $
-                                      testServiceWhitelistUpdatePermissions conf db b g
-            , test p "search works" $ testSearchServiceWhitelist conf db b g
+            [ test p "search permissions"
+                              $ testWhitelistSearchPermissions conf db b g
+            , test p "update permissions"
+                              $ testWhitelistUpdatePermissions conf db b g
+            , test p "search" $ testSearchWhitelist conf db b g
+            , test p "events" $ testWhitelistEvents conf db b g c
             ]
         , testGroup "bot"
             [ test p "add-remove" $ testAddRemoveBot conf crt db b g c
@@ -617,8 +618,8 @@ testDeleteTeamBotTeam config crt db brig galley cannon = withTestService config 
 -------------------------------------------------------------------------------
 -- Service Whitelist
 
-testServiceWhitelistSearchPermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
-testServiceWhitelistSearchPermissions _config _db brig galley = do
+testWhitelistSearchPermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
+testWhitelistSearchPermissions _config _db brig galley = do
     -- Create a team and some random user that's not on the team
     (_, tid) <- Team.createUserWithTeam brig galley
     uid <- userId <$> randomUser brig
@@ -627,8 +628,8 @@ testServiceWhitelistSearchPermissions _config _db brig galley = do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
 
-testServiceWhitelistUpdatePermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
-testServiceWhitelistUpdatePermissions config db brig galley = do
+testWhitelistUpdatePermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
+testWhitelistUpdatePermissions config db brig galley = do
     -- Create a team
     (owner, tid) <- Team.createUserWithTeam brig galley
     -- Create a service
@@ -647,8 +648,8 @@ testServiceWhitelistUpdatePermissions config db brig galley = do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
 
-testSearchServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
-testSearchServiceWhitelist config db brig galley = do
+testSearchWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
+testSearchWhitelist config db brig galley = do
     -- Create a team, a team owner, and a team member with no permissions
     (owner, tid) <- Team.createUserWithTeam brig galley
     uid <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
@@ -726,6 +727,35 @@ testSearchServiceWhitelist config db brig galley = do
                            , newServiceTags = unsafeRange (Set.fromList t)
                            }
     select prefix = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd)
+
+testWhitelistEvents
+    :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Cannon -> Http ()
+testWhitelistEvents config db brig galley cannon = do
+    -- Create a team with two owners and a member
+    (owner1, tid) <- Team.createUserWithTeam brig galley
+    owner2 <- userId <$> Team.createTeamMember brig galley owner1 tid Team.fullPermissions
+    member <- userId <$> Team.createTeamMember brig galley owner1 tid Team.noPermissions
+    -- Create a service
+    pid <- providerId <$> randomProvider db brig
+    new <- defNewService config
+    sid <- serviceId <$> addGetService brig pid new
+    enableService brig pid sid
+    -- Whitelist the service and check that owners get an event but the
+    -- member doesn't
+    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, _wsMember) -> do
+        whitelistService brig owner1 tid pid sid
+        wsAssertServiceWhitelistAdd wsOwner1 tid pid sid
+        wsAssertServiceWhitelistAdd wsOwner2 tid pid sid
+        -- TODO: check that member doesn't
+    -- TODO: whitelist again, no events this time
+    -- Remove the service from the whitelist and check the events
+    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, _wsMember) -> do
+        updateServiceWhitelist brig owner2 tid (UpdateServiceWhitelist pid sid False) !!!
+            const 200 === statusCode
+        wsAssertServiceWhitelistRemove wsOwner1 tid pid sid
+        wsAssertServiceWhitelistRemove wsOwner2 tid pid sid
+    -- TODO: we should also check that there are events when the service is deleted,
+    -- but at the moment of writing this test that was not implemented.
 
 --------------------------------------------------------------------------------
 -- API Operations
@@ -1117,6 +1147,7 @@ whitelistService
     -> Http ()
 whitelistService brig uid tid pid sid =
     updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True) !!!
+        -- TODO: allow both 200 and 204 here and use it in 'testWhitelistEvents'
         const 200 === statusCode
 
 defNewService :: MonadIO m => Maybe Config -> m NewService
@@ -1316,6 +1347,24 @@ wsAssertTeamConvDelete ws tid conv = void $ liftIO $
         e^.(Team.eventType) @?= Team.ConvDelete
         e^.(Team.eventTeam) @?= tid
         e^.(Team.eventData) @?= Just (Team.EdConvDelete conv)
+
+wsAssertServiceWhitelistAdd :: MonadIO m => WS.WebSocket -> TeamId -> ProviderId -> ServiceId -> m ()
+wsAssertServiceWhitelistAdd ws tid pid sid = void $ liftIO $
+    WS.assertMatch (5 # Second) ws $ \n -> do
+        let e = List1.head (WS.unpackPayload n)
+        ntfTransient n @?= False
+        e^.(Team.eventType) @?= Team.ServiceWhitelistAdd
+        e^.(Team.eventTeam) @?= tid
+        e^.(Team.eventData) @?= Just (Team.EdServiceWhitelistAdd pid sid)
+
+wsAssertServiceWhitelistRemove :: MonadIO m => WS.WebSocket -> TeamId -> ProviderId -> ServiceId -> m ()
+wsAssertServiceWhitelistRemove ws tid pid sid = void $ liftIO $
+    WS.assertMatch (5 # Second) ws $ \n -> do
+        let e = List1.head (WS.unpackPayload n)
+        ntfTransient n @?= False
+        e^.(Team.eventType) @?= Team.ServiceWhitelistRemove
+        e^.(Team.eventTeam) @?= tid
+        e^.(Team.eventData) @?= Just (Team.EdServiceWhitelistRemove pid sid)
 
 wsAssertMessage :: MonadIO m => WS.WebSocket -> ConvId -> UserId -> ClientId -> ClientId -> Text -> m ()
 wsAssertMessage ws conv fromu fromc to txt = void $ liftIO $
