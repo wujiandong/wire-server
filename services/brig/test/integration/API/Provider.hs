@@ -742,18 +742,23 @@ testWhitelistEvents config db brig galley cannon = do
     enableService brig pid sid
     -- Whitelist the service and check that owners get an event but the
     -- member doesn't
-    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, _wsMember) -> do
+    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, wsMember) -> do
         whitelistService brig owner1 tid pid sid
         wsAssertServiceWhitelistAdd wsOwner1 tid pid sid
         wsAssertServiceWhitelistAdd wsOwner2 tid pid sid
-        -- TODO: check that member doesn't
-    -- TODO: whitelist again, no events this time
+        WS.assertNoEvent (2 # Second) [wsMember]
+    -- Whitelist again, no events this time because nothing changed
+    WS.bracketRN cannon [owner1, owner2, member] $ \wss -> do
+        updateServiceWhitelist brig owner2 tid (UpdateServiceWhitelist pid sid True) !!!
+            const 204 === statusCode
+        WS.assertNoEvent (2 # Second) wss
     -- Remove the service from the whitelist and check the events
-    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, _wsMember) -> do
+    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, wsMember) -> do
         updateServiceWhitelist brig owner2 tid (UpdateServiceWhitelist pid sid False) !!!
             const 200 === statusCode
         wsAssertServiceWhitelistRemove wsOwner1 tid pid sid
         wsAssertServiceWhitelistRemove wsOwner2 tid pid sid
+        WS.assertNoEvent (2 # Second) [wsMember]
     -- TODO: we should also check that there are events when the service is deleted,
     -- but at the moment of writing this test that was not implemented.
 
