@@ -106,9 +106,9 @@ tests conf p db b c g = do
             , test p "delete"                 $ testDeleteService conf db b
             ]
         , testGroup "service whitelist"
-            [ test p "list all"        $ testListServiceWhitelist conf db b g
-            , test p "list enabled"    $ testListServiceWhitelistEnabled conf db b g
-            , test p "search (prefix)" $ testSearchServiceWhitelist conf db b g
+            [ test p "non-team-member can't search" $
+                                      testServiceWhitelistSearchPermissions conf db b g
+            , test p "search works" $ testSearchServiceWhitelist conf db b g
             ]
         , testGroup "bot"
             [ test p "add-remove" $ testAddRemoveBot conf crt db b g c
@@ -613,22 +613,24 @@ testDeleteTeamBotTeam config crt db brig galley cannon = withTestService config 
 -------------------------------------------------------------------------------
 -- Service Whitelist
 
-testListServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
-testListServiceWhitelist = undefined
-
-testListServiceWhitelistEnabled :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
-testListServiceWhitelistEnabled = undefined
+testServiceWhitelistSearchPermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
+testServiceWhitelistSearchPermissions _config _db brig galley = do
+    -- Create a team and some random user that's not on the team
+    (_, tid) <- Team.createUserWithTeam brig galley
+    uid <- userId <$> randomUser brig
+    -- Check that this random user can't search
+    listTeamServiceProfilesByPrefix brig uid tid Nothing True 20 !!! do
+        const 403 === statusCode
+        const (Just "insufficient-permissions") === fmap Error.label . decodeBody
 
 testSearchServiceWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testSearchServiceWhitelist config db brig galley = do
-    prv <- randomProvider db brig
-    let pid = providerId prv
-
-    -- Create a user, a team, and some random user that's not on the team
+    -- Create a team and a user who's on that team
     (uid, tid) <- Team.createUserWithTeam brig galley
-    notMember <- randomUser brig
 
     -- Create services and add them all to the whitelist
+    prv <- randomProvider db brig
+    let pid = providerId prv
     uniq <- UUID.toText . toUUID <$> randomId
     new  <- defNewService config
     svcs <- mapM (addGetService brig pid . mkNew new) (taggedServiceNames uniq)
@@ -641,15 +643,10 @@ testSearchServiceWhitelist config db brig galley = do
     let services :: [(ServiceId, Name)]
         services = map (serviceId &&& serviceName) svcs
 
-    -- Check that search doesn't work for the user who's not a part of the team
-    listTeamServiceProfilesByPrefix brig (userId notMember) tid Nothing True 20 !!! do
-        const 403 === statusCode
-        const (Just "insufficient-permissions") === fmap Error.label . decodeBody
-
-    -- This is how we're going to call our .../services/whitelisted endpoint
-    -- from now on. Every time we call it twice (with filter_disabled=false
-    -- and without) and assert that results match – which should always be
-    -- the case since in this test we won't have any disabled services.
+    -- This is how we're going to call our .../services/whitelisted
+    -- endpoint. Every time we call it twice (with filter_disabled=false and
+    -- without) and assert that results match – which should always be the
+    -- case since in this test we won't have any disabled services.
     let search :: Maybe Text -> Http ServiceProfilePage
         search mbName = do
             r1 <- searchServiceWhitelist    brig 20 uid tid mbName
@@ -659,7 +656,7 @@ testSearchServiceWhitelist config db brig galley = do
                 r1 r2
             return r1
 
-    -- Check that search works for the user who's on the team
+    -- Check that search finds all services that we created
     search (Just uniq) >>=
         assertServiceDetails ("all with prefix " <> show uniq) services
 
@@ -684,7 +681,7 @@ testSearchServiceWhitelist config db brig galley = do
     forM_ services $ \(sid, Name name) ->
         search (Just name) >>= assertServiceDetails ("name " <> show name) [(sid, Name name)]
 
-    -- Some chosen prefixes
+    -- Check some chosen prefixes.
     -- # Bjø -> Bjørn
     _found <- map serviceProfileName <$> searchAndCheck (mkName "Bjø")
     liftIO $ assertEqual "Bjø" [mkName "Bjørn"] _found
