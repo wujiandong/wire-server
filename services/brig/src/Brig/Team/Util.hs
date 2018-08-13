@@ -6,6 +6,10 @@ import Brig.App
 import Control.Lens
 import Data.Id
 import Galley.Types.Teams
+import Brig.API.Error
+import Control.Error
+import Control.Monad.Trans.Class
+import Control.Monad
 
 import qualified Brig.IO.Intra as Intra
 import qualified Data.Set as Set
@@ -23,3 +27,13 @@ teamOwnershipStatus' uid (Set.fromList -> owners)
     | uid `Set.notMember` owners       = IsNotTeamOwner
     | Set.null (Set.delete uid owners) = IsOnlyTeamOwner
     | otherwise                        = IsOneOfManyTeamOwners
+
+ensurePermissions :: UserId -> TeamId -> [Perm] -> ExceptT Error AppIO ()
+ensurePermissions u t perms = do
+    m <- lift $ Intra.getTeamMember u t
+    unless (check m) $
+        throwStd insufficientTeamPermissions
+  where
+    check :: Maybe TeamMember -> Bool
+    check (Just m) = and $ hasPermission m <$> perms
+    check Nothing  = False
