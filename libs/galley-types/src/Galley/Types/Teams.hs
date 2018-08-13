@@ -52,7 +52,7 @@ module Galley.Types.Teams
     , fullPermissions
     , noPermissions
     , hasPermission
-    , hasFullPermissions
+    , isTeamOwner
     , self
     , copy
 
@@ -301,9 +301,27 @@ noPermissions = Permissions mempty mempty
 hasPermission :: TeamMember -> Perm -> Bool
 hasPermission tm p = p `Set.member` (tm^.permissions.self)
 
--- | Indicates a team owner.
-hasFullPermissions :: TeamMember -> Bool
-hasFullPermissions tm = fullPermissions == (tm^.permissions)
+isTeamOwner :: TeamMember -> Bool
+isTeamOwner tm = fullPermissions == (tm^.permissions)
+
+-- Note [team roles]
+-- ~~~~~~~~~~~~
+--
+-- Clients define roles by sets of permissions:
+--     member =
+--         {Add/RemoveConversationMember, Create/DeleteConversation,
+--         GetMemberPermissions, GetTeamConversations}
+--     admin = member +
+--         {Add/RemoveTeamMember, SetMemberPermissions, SetTeamData}
+--     owner = admin +
+--         {DeleteTeam, Get/SetBilling}
+--
+-- For instance, here: https://github.com/wireapp/wire-webapp/blob/dev/app/script/team/TeamPermission.js
+--
+-- On the backend, however, a team owner is defined as "full bitmask", and
+-- when we do checks like "don't let the last team owner leave the team",
+-- this is what we test for. We never test for "team admin" – instead we
+-- require specific permissions (which admins have).
 
 permToInt :: Perm -> Word64
 permToInt CreateConversation       = 0x0001

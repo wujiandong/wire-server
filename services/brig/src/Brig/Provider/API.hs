@@ -647,7 +647,7 @@ updateServiceWhitelist (uid ::: conn ::: tid ::: req) = do
         sid = updateServiceWhitelistService upd
         newWhitelisted = updateServiceWhitelistStatus upd
     member <- lift $ RPC.getTeamMember uid tid
-    unless (maybe False Teams.hasFullPermissions member) $
+    unless (maybe False Teams.isTeamOwner member) $
         throwStd insufficientTeamPermissions
     _ <- DB.lookupService pid sid >>= maybeServiceNotFound
     whitelisted <- DB.getServiceWhitelistStatus tid pid sid

@@ -638,11 +638,7 @@ getTeamContacts u = do
 -- body.  When brig wants to know, it can call both parts.  These thoughts may all become obsolete
 -- if we introduce a deletion service in the future.
 getTeamOwners :: TeamId -> AppIO [Team.TeamMember]
-getTeamOwners tid = filterByPerms <$> getTeamMembers tid
-  where
-    filterByPerms :: Team.TeamMemberList -> [Team.TeamMember]
-    filterByPerms mems =
-        filter ((== Team.fullPermissions) . (^. Team.permissions)) (mems ^. Team.teamMembers)
+getTeamOwners tid = filter Team.isTeamOwner . view Team.teamMembers <$> getTeamMembers tid
 
 -- | Like 'getTeamOwners', but only returns owners with an email address.
 getTeamOwnersWithEmail :: TeamId -> AppIO [Team.TeamMember]

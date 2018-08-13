@@ -434,9 +434,9 @@ testListServices config db brig = do
     let services :: [(ServiceId, Name)]
         services = map (serviceId &&& serviceName) svcs
 
-    -- This is how we're going to call our /services/search endpoint. Every
-    -- time we would call it twice (with tags and without) and assert that
-    -- results match.
+    -- This is how we're going to call our /services endpoint. Every time we
+    -- would call it twice (with tags and without) and assert that results
+    -- match.
     let search :: HasCallStack => Name -> Http ServiceProfilePage
         search name = do
             r1 <- searchServices brig 20 uid (Just name) Nothing
