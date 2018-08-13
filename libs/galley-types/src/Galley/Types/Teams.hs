@@ -287,7 +287,11 @@ isTeamMember u = isJust . findTeamMember u
 findTeamMember :: Foldable m => UserId -> m TeamMember -> Maybe TeamMember
 findTeamMember u = find ((u ==) . view userId)
 
-newPermissions :: Set Perm -> Set Perm -> Maybe Permissions
+newPermissions
+    :: Set Perm            -- ^ User's permissions
+    -> Set Perm            -- ^ Permissions that the user will be able to
+                           --   grant to other users (must be a subset)
+    -> Maybe Permissions
 newPermissions a b
     | b `Set.isSubsetOf` a = Just (Permissions a b)
     | otherwise            = Nothing
@@ -300,9 +304,6 @@ noPermissions = Permissions mempty mempty
 
 hasPermission :: TeamMember -> Perm -> Bool
 hasPermission tm p = p `Set.member` (tm^.permissions.self)
-
-isTeamOwner :: TeamMember -> Bool
-isTeamOwner tm = fullPermissions == (tm^.permissions)
 
 -- Note [team roles]
 -- ~~~~~~~~~~~~
@@ -320,8 +321,11 @@ isTeamOwner tm = fullPermissions == (tm^.permissions)
 --
 -- On the backend, however, a team owner is defined as "full bitmask", and
 -- when we do checks like "don't let the last team owner leave the team",
--- this is what we test for. We never test for "team admin" – instead we
--- require specific permissions (which admins have).
+-- this is what we test for. We also never test for "team admin", and
+-- instead look at specific permissions.
+
+isTeamOwner :: TeamMember -> Bool
+isTeamOwner tm = fullPermissions == (tm^.permissions)
 
 permToInt :: Perm -> Word64
 permToInt CreateConversation       = 0x0001

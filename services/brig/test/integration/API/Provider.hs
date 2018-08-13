@@ -620,18 +620,28 @@ testDeleteTeamBotTeam config crt db brig galley cannon = withTestService config 
 
 testWhitelistSearchPermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testWhitelistSearchPermissions _config _db brig galley = do
-    -- Create a team and some random user that's not on the team
-    (_, tid) <- Team.createUserWithTeam brig galley
-    uid <- userId <$> randomUser brig
-    -- Check that this random user can't search
-    listTeamServiceProfilesByPrefix brig uid tid Nothing True 20 !!! do
+    -- Create a team
+    (owner, tid) <- Team.createUserWithTeam brig galley
+    -- Check that users who are not on the team can't search
+    _uid <- userId <$> randomUser brig
+    listTeamServiceProfilesByPrefix brig _uid tid Nothing True 20 !!! do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
+    -- Check that team members with no permissions can search
+    _uid <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
+    listTeamServiceProfilesByPrefix brig _uid tid Nothing True 20 !!!
+        const 200 === statusCode
 
 testWhitelistUpdatePermissions :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testWhitelistUpdatePermissions config db brig galley = do
     -- Create a team
     (owner, tid) <- Team.createUserWithTeam brig galley
+    -- Create a team admin
+    let Just adminPermissions = Team.newPermissions
+            (Set.fromList [Team.AddTeamMember, Team.RemoveTeamMember,
+                           Team.RemoveConversationMember, Team.SetTeamData])
+            mempty
+    admin <- userId <$> Team.createTeamMember brig galley owner tid adminPermissions
     -- Create a service
     pid <- providerId <$> randomProvider db brig
     new <- defNewService config
@@ -642,11 +652,16 @@ testWhitelistUpdatePermissions config db brig galley = do
     updateServiceWhitelist brig _uid tid (UpdateServiceWhitelist pid sid True) !!! do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
-    -- Check that a member who's not a team owner also can't add it to the whitelist
+    -- Check that a member who's not a team admin also can't add it to the whitelist
     _uid <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
     updateServiceWhitelist brig _uid tid (UpdateServiceWhitelist pid sid True) !!! do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
+    -- Check that a team admin can add and remove from the whitelist
+    updateServiceWhitelist brig admin tid (UpdateServiceWhitelist pid sid True) !!!
+        const 200 === statusCode
+    updateServiceWhitelist brig admin tid (UpdateServiceWhitelist pid sid False) !!!
+        const 200 === statusCode
 
 testSearchWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testSearchWhitelist config db brig galley = do
@@ -731,34 +746,28 @@ testSearchWhitelist config db brig galley = do
 testWhitelistEvents
     :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Cannon -> Http ()
 testWhitelistEvents config db brig galley cannon = do
-    -- Create a team with two owners and a member
-    (owner1, tid) <- Team.createUserWithTeam brig galley
-    owner2 <- userId <$> Team.createTeamMember brig galley owner1 tid Team.fullPermissions
-    member <- userId <$> Team.createTeamMember brig galley owner1 tid Team.noPermissions
+    -- Create a team with an owner and a member
+    (owner, tid) <- Team.createUserWithTeam brig galley
+    member <- userId <$> Team.createTeamMember brig galley owner tid Team.noPermissions
     -- Create a service
     pid <- providerId <$> randomProvider db brig
     new <- defNewService config
     sid <- serviceId <$> addGetService brig pid new
     enableService brig pid sid
-    -- Whitelist the service and check that owners get an event but the
-    -- member doesn't
-    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, wsMember) -> do
-        whitelistService brig owner1 tid pid sid
-        wsAssertServiceWhitelistAdd wsOwner1 tid pid sid
-        wsAssertServiceWhitelistAdd wsOwner2 tid pid sid
-        WS.assertNoEvent (2 # Second) [wsMember]
+    -- Whitelist the service and check that everyone gets the event
+    WS.bracketRN cannon [owner, member] $ \wss -> do
+        whitelistService brig owner tid pid sid
+        forM_ wss $ \ws -> wsAssertServiceWhitelistAdd ws tid pid sid
     -- Whitelist again, no events this time because nothing changed
-    WS.bracketRN cannon [owner1, owner2, member] $ \wss -> do
-        updateServiceWhitelist brig owner2 tid (UpdateServiceWhitelist pid sid True) !!!
+    WS.bracketRN cannon [owner, member] $ \wss -> do
+        updateServiceWhitelist brig owner tid (UpdateServiceWhitelist pid sid True) !!!
             const 204 === statusCode
         WS.assertNoEvent (2 # Second) wss
     -- Remove the service from the whitelist and check the events
-    WS.bracketR3 cannon owner1 owner2 member $ \(wsOwner1, wsOwner2, wsMember) -> do
-        updateServiceWhitelist brig owner2 tid (UpdateServiceWhitelist pid sid False) !!!
+    WS.bracketRN cannon [owner, member] $ \wss -> do
+        updateServiceWhitelist brig owner tid (UpdateServiceWhitelist pid sid False) !!!
             const 200 === statusCode
-        wsAssertServiceWhitelistRemove wsOwner1 tid pid sid
-        wsAssertServiceWhitelistRemove wsOwner2 tid pid sid
-        WS.assertNoEvent (2 # Second) [wsMember]
+        forM_ wss $ \ws -> wsAssertServiceWhitelistRemove ws tid pid sid
     -- TODO: we should also check that there are events when the service is deleted,
     -- but at the moment of writing this test that was not implemented.
 

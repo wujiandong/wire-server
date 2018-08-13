@@ -19,6 +19,7 @@ import Brig.Options (Settings (..))
 import Brig.Password
 import Brig.Provider.DB (ServiceConn (..))
 import Brig.Provider.Email
+import Brig.Team.Util
 import Brig.Types.Intra (UserAccount (..), AccountStatus (..))
 import Brig.Types.Client
 import Brig.Types.User (publicProfile, User (..), Pict (..))
@@ -646,9 +647,9 @@ updateServiceWhitelist (uid ::: conn ::: tid ::: req) = do
     let pid = updateServiceWhitelistProvider upd
         sid = updateServiceWhitelistService upd
         newWhitelisted = updateServiceWhitelistStatus upd
-    member <- lift $ RPC.getTeamMember uid tid
-    unless (maybe False Teams.isTeamOwner member) $
-        throwStd insufficientTeamPermissions
+    if newWhitelisted
+        then ensurePermissions uid tid [Teams.AddTeamMember, Teams.SetTeamData]
+        else ensurePermissions uid tid [Teams.RemoveTeamMember, Teams.RemoveConversationMember, Teams.SetTeamData]
     _ <- DB.lookupService pid sid >>= maybeServiceNotFound
     whitelisted <- DB.getServiceWhitelistStatus tid pid sid
     case (whitelisted, newWhitelisted) of
@@ -859,8 +860,8 @@ validateServiceKey pem = liftIO $ readPublicKey >>= \pk ->
         (const $ return Nothing)
         (SSL.readPublicKey (LC8.unpack (toByteString pem)) >>= return . Just)
 
--- | Send team owners an event about a change in the services whitelist for
--- their team.
+-- | Send all team members an event about a change in the services
+-- whitelist.
 notifyServiceWhitelistUpdate
     :: TeamId
     -> UserId        -- ^ The user who caused the whitelist to change
@@ -870,15 +871,15 @@ notifyServiceWhitelistUpdate
     -> Bool          -- ^ True=added, False=removed
     -> AppIO ()
 notifyServiceWhitelistUpdate tid uid conn pid sid status = do
-    mbOwners <- RPC.getTeamOwners tid
-    case mbOwners of
+    mbMembers <- view Teams.teamMembers <$> RPC.getTeamMembers tid
+    case mbMembers of
         [] -> pure ()
         x:xs -> do
-            let owners = fmap (view Teams.userId) (list1 x xs)
+            let members = fmap (view Teams.userId) (list1 x xs)
             now <- liftIO getCurrentTime
             let event = Teams.newEvent eventType tid now
                           & Teams.eventData .~ Just eventData
-            RPC.rawPush (mkEventList event) owners uid Push.RouteAny (Just conn)
+            RPC.rawPush (mkEventList event) members uid Push.RouteAny (Just conn)
   where
     mkEventList event = singleton ( Log.bytes (Aeson.encode event)
                                   , (toJSONObject event, Nothing) )
