@@ -29,7 +29,6 @@ lookup u c = foldM mk [] =<< retry x1 (query q (params c (Identity u)))
 
     mk as r = maybe as (:as) <$> mkAddr r
 
--- TODO: user_push doesn't exist anymore so this should go away
 insert :: MonadClient m => UserId -> Transport -> AppName -> Token -> EndpointArn -> ConnId -> ClientId -> Maybe Transport -> m ()
 insert u t a p e o c f = retry x5 $ write q (params Quorum (u, t, a, p, e, o, c, f))
   where

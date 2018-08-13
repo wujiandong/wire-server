@@ -110,6 +110,8 @@ tests conf p db b c g = do
                               $ testWhitelistSearchPermissions conf db b g
             , test p "update permissions"
                               $ testWhitelistUpdatePermissions conf db b g
+            , test p "basic functionality"
+                              $ testWhitelistBasic conf crt db b g
             , test p "search" $ testSearchWhitelist conf db b g
             , test p "events" $ testWhitelistEvents conf db b g c
             ]
@@ -658,10 +660,8 @@ testWhitelistUpdatePermissions config db brig galley = do
         const 403 === statusCode
         const (Just "insufficient-permissions") === fmap Error.label . decodeBody
     -- Check that a team admin can add and remove from the whitelist
-    updateServiceWhitelist brig admin tid (UpdateServiceWhitelist pid sid True) !!!
-        const 200 === statusCode
-    updateServiceWhitelist brig admin tid (UpdateServiceWhitelist pid sid False) !!!
-        const 200 === statusCode
+    whitelistService brig admin tid pid sid
+    dewhitelistService brig admin tid pid sid
 
 testSearchWhitelist :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Http ()
 testSearchWhitelist config db brig galley = do
@@ -743,6 +743,38 @@ testSearchWhitelist config db brig galley = do
                            }
     select prefix = filter (isPrefixOf (toLower prefix) . toLower . fromName . snd)
 
+testWhitelistBasic :: Maybe Config -> FilePath -> DB.ClientState -> Brig -> Galley -> Http ()
+testWhitelistBasic config crt db brig galley =
+  withTestService config crt db brig defServiceApp $ \sref buf -> do
+    let pid = sref^.serviceRefProvider
+    let sid = sref^.serviceRefId
+    -- Create a team
+    (owner, tid) <- Team.createUserWithTeam brig galley
+    -- Check that the service can't be added to a conversation by default
+    cid <- Team.createTeamConv galley tid owner [] Nothing
+    addBot brig owner pid sid cid !!! do
+        const 403 === statusCode
+        const (Just "service-not-whitelisted") === fmap Error.label . decodeBody
+    -- Check that after whitelisting the service, it can be added to the conversation
+    whitelistService brig owner tid pid sid
+    rs <- addBot brig owner pid sid cid <!!
+        const 201 === statusCode
+    let Just bid = rsAddBotId <$> decodeBody rs
+    _ <- svcAssertBotCreated buf bid cid
+    -- TODO: check that after de-whitelisting and sending a message, the
+    -- service is not in the conversation anymore.
+
+    -- Check that after de-whitelisting the service can't be added to conversations
+    removeBot brig owner cid bid !!!
+        const 200 === statusCode
+    dewhitelistService brig owner tid pid sid
+    addBot brig owner pid sid cid !!! do
+        const 403 === statusCode
+        const (Just "service-not-whitelisted") === fmap Error.label . decodeBody
+    -- Check that a disabled service can be whitelisted
+    disableService brig pid sid
+    whitelistService brig owner tid pid sid
+
 testWhitelistEvents
     :: Maybe Config -> DB.ClientState -> Brig -> Galley -> Cannon -> Http ()
 testWhitelistEvents config db brig galley cannon = do
@@ -765,8 +797,7 @@ testWhitelistEvents config db brig galley cannon = do
         WS.assertNoEvent (2 # Second) wss
     -- Remove the service from the whitelist and check the events
     WS.bracketRN cannon [owner, member] $ \wss -> do
-        updateServiceWhitelist brig owner tid (UpdateServiceWhitelist pid sid False) !!!
-            const 200 === statusCode
+        dewhitelistService brig owner tid pid sid
         forM_ wss $ \ws -> wsAssertServiceWhitelistRemove ws tid pid sid
     -- TODO: we should also check that there are events when the service is deleted,
     -- but at the moment of writing this test that was not implemented.
@@ -1151,6 +1182,14 @@ enableService brig pid sid = do
     updateServiceConn brig pid sid upd !!!
         const 200 === statusCode
 
+disableService :: HasCallStack => Brig -> ProviderId -> ServiceId -> Http ()
+disableService brig pid sid = do
+    let upd = (mkUpdateServiceConn defProviderPassword)
+            { updateServiceConnEnabled  = Just False
+            }
+    updateServiceConn brig pid sid upd !!!
+        const 200 === statusCode
+
 whitelistService
     :: HasCallStack
     => Brig
@@ -1161,6 +1200,19 @@ whitelistService
     -> Http ()
 whitelistService brig uid tid pid sid =
     updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid True) !!!
+        -- TODO: allow both 200 and 204 here and use it in 'testWhitelistEvents'
+        const 200 === statusCode
+
+dewhitelistService
+    :: HasCallStack
+    => Brig
+    -> UserId           -- ^ Team owner
+    -> TeamId           -- ^ Team
+    -> ProviderId
+    -> ServiceId
+    -> Http ()
+dewhitelistService brig uid tid pid sid =
+    updateServiceWhitelist brig uid tid (UpdateServiceWhitelist pid sid False) !!!
         -- TODO: allow both 200 and 204 here and use it in 'testWhitelistEvents'
         const 200 === statusCode
 

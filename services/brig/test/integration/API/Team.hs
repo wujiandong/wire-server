@@ -587,7 +587,7 @@ testCreateUserInternalSSO brig galley = do
     let Just teamid' = userTeam $ selfUser profile
     liftIO $ assertEqual "bad team_id" teamid teamid'
 
-    -- does gally know about this?  is user active?
+    -- does galley know about this?  is user active?
     _ <- getTeamMember uid teamid galley
     isact <- isActivatedUser uid brig
     liftIO $ assertBool "user not activated" isact
